@@ -4,16 +4,39 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const readline = require('node:readline');
+const { createPresence } = require('./presence');
 
 const root = __dirname;
+
+// Optional .env next to server.js (git-ignored). Real environment variables win. Tolerates "KEY = value" and quotes.
+try {
+  for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split(/\r?\n/)) {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (match && !line.trimStart().startsWith('#') && process.env[match[1]] === undefined) process.env[match[1]] = match[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
+} catch { /* no .env */ }
+
 const dataDir = path.join(root, 'data');
 const eventFile = path.join(dataDir, 'requests.jsonl');
 const publicDir = path.join(root, 'public');
 const upstream = new URL(process.env.OLLAMA_URL || 'http://127.0.0.1:11434');
-const monitorPort = Number(process.env.MONITOR_PORT || 11500);
+// 11500 is taken by the dedicated Ollama that the local MCP server (ollama-mcp) starts, so the dashboard uses 11501.
+const monitorPort = Number(process.env.MONITOR_PORT || 11501);
 const proxyPort = Number(process.env.PROXY_PORT || 11435);
 const proxyHost = process.env.PROXY_HOST || '0.0.0.0';
 const logDir = process.env.OLLAMA_LOG_DIR || 'C:\\ollama\\logs';
+// Source address of the proxy's own upstream calls. The main Ollama log then shows 127.0.0.2 for forwarded
+// requests (possibly from the NAS), which presence.js does not treat as local use.
+const upstreamIsLoopback = upstream.hostname === '127.0.0.1';
+
+const presence = createPresence({
+  env: process.env,
+  version: require('./package.json').version,
+  localOllamaUrl: process.env.LOCAL_OLLAMA_URL || 'http://127.0.0.1:11500',
+  ollamaLogFile: path.join(logDir, 'ollama.out.log'),
+  probeScript: path.join(root, 'probe.ps1'),
+  log: (...args) => console.log('[presence]', ...args)
+});
 
 let events = [];
 let imported = 0;
@@ -154,8 +177,9 @@ async function proxyRequest(req, res) {
   try { body = await readRequestBody(req); } catch { res.writeHead(400).end('Bad request'); return; }
   let model = 'なし';
   try { model = JSON.parse(body.toString('utf8')).model || model; } catch { /* non-JSON API request */ }
+  presence.noteProxyRequest({ remoteAddress: req.socket.remoteAddress, url: req.url, model });
   const headers = { ...req.headers, host: upstream.host, 'content-length': String(body.length) };
-  const upstreamReq = http.request({ protocol: upstream.protocol, hostname: upstream.hostname, port: upstream.port, method: req.method, path: req.url, headers }, (upstreamRes) => {
+  const upstreamReq = http.request({ protocol: upstream.protocol, hostname: upstream.hostname, port: upstream.port, method: req.method, path: req.url, headers, ...(upstreamIsLoopback && { localAddress: '127.0.0.2' }) }, (upstreamRes) => {
     res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
     upstreamRes.pipe(res);
     const record = () => appendEvent({ timestamp: new Date().toISOString(), model, operation: operationFor(req.url), method: req.method, path: req.url.split('?')[0], status: upstreamRes.statusCode || 0, durationMs: Date.now() - began, client: req.socket.remoteAddress || '', source: 'proxy' });
@@ -171,8 +195,37 @@ async function proxyRequest(req, res) {
 }
 
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+// The dashboard can declare a work hold on the NAS, so refuse requests that did not come from a page we served
+// (DNS rebinding / another website posting to localhost).
+function isSameOriginRequest(req) {
+  const host = String(req.headers.host || '');
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return false;
+  const origin = req.headers.origin;
+  return !origin || origin === `http://${host}`;
+}
+
+async function handlePresenceApi(req, res, url) {
+  if (!isSameOriginRequest(req)) return asJson(res, { error: 'forbidden' }, 403);
+  if (url.pathname === '/monitor/api/presence' && req.method === 'GET') {
+    return asJson(res, url.searchParams.has('refresh') ? await presence.refresh() : presence.getSnapshot());
+  }
+  if (url.pathname === '/monitor/api/work-hold' && req.method === 'POST') {
+    let input;
+    try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'JSON が不正です' }, 400); }
+    try { return asJson(res, await presence.setWorkHold(input.minutes, input.reason)); }
+    catch (error) {
+      const status = error.code === 'BAD_REQUEST' ? 400 : error.code === 'UNCONFIGURED' ? 503 : 502;
+      return asJson(res, { error: error.message, snapshot: presence.getSnapshot() }, status);
+    }
+  }
+  return asJson(res, { error: 'not found' }, 404);
+}
+
 const monitor = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold') {
+    return handlePresenceApi(req, res, url).catch((error) => asJson(res, { error: error.message }, 500));
+  }
   if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24));
   if (url.pathname === '/monitor/api/live') { try { return asJson(res, await liveStatus()); } catch (e) { return asJson(res, { connected: false, error: e.message }, 502); } }
   if (url.pathname === '/monitor/api/config') return asJson(res, { monitorPort, proxyPort, proxyHost, logDir, upstream: upstream.href.replace(/\/$/, '') });
@@ -189,5 +242,8 @@ async function main() {
   monitor.listen(monitorPort, '127.0.0.1', () => console.log(`Monitor: http://127.0.0.1:${monitorPort}`));
   http.createServer(proxyRequest).listen(proxyPort, proxyHost, () => console.log(`Ollama capture proxy: http://${proxyHost}:${proxyPort} -> ${upstream.href}`));
   importOllamaLogs().then(() => console.log(`Imported ${imported} historic access-log events from ${logDir}`));
+  presence.start();
+  console.log(presence.getSnapshot().configured ? `NKS presence: host ${process.env.NKS_HOST_ID} -> ${process.env.NKS_URL}` : 'NKS presence: not configured (set NKS_URL / NKS_API_KEY / NKS_HOST_ID); local measurements only');
 }
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { presence.stop(); process.exit(0); });
 main().catch((error) => { console.error(error); process.exitCode = 1; });

@@ -1,8 +1,15 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ollama Monitor</title><link rel="stylesheet" href="/style.css"></head>
 <body><header><div><p class="eyebrow">OLLAMA / REQUEST OBSERVABILITY</p><h1>Ollama 稼働モニタ</h1><p id="connection" class="sub">接続を確認中…</p></div><div class="actions"><label>期間 <select id="range"><option value="1">直近1時間</option><option value="24" selected>直近24時間</option><option value="168">直近7日間</option><option value="720">直近30日間</option></select></label><button id="refresh">更新</button></div></header>
-<main><section class="cards"><article><span>呼び出し回数</span><strong id="total">—</strong><small id="rate">— / 時間</small></article><article><span>稼働中モデル</span><strong id="loaded">—</strong><small id="installed">—</small></article><article><span>メモリ使用量</span><strong id="memory">—</strong><small id="cpu">—</small></article><article><span>取り込み済み履歴</span><strong id="imported">—</strong><small>Ollama アクセスログ</small></article></section>
+<main><section class="panel" id="presence"><div class="panel-title"><h2>在席・作業宣言（NAS 連携）</h2><span id="pr-host"></span></div>
+<div id="pr-status" class="pr-status unknown">不明</div><div id="pr-detail" class="pr-detail"></div>
+<div class="pr-row"><span class="pr-label">いまの押さえ</span><div id="pr-holds" class="pr-holds"></div></div>
+<div class="pr-row"><span class="pr-label">作業宣言</span><div class="pr-actions"><input id="pr-reason" type="text" maxlength="100" placeholder="内容（任意・例: 動画編集）"><button type="button" data-minutes="30">30分</button><button type="button" data-minutes="60">1時間</button><button type="button" data-minutes="180">3時間</button><button type="button" data-minutes="0">解除</button></div></div>
+<div id="pr-message" class="pr-message" role="status"></div>
+<div class="pr-row"><span class="pr-label">最後に NAS と話せた時刻</span><span id="pr-lastok">—</span></div>
+<div class="pr-row"><span class="pr-label">この PC の測定値</span><span id="pr-measure" class="pr-measure">—</span></div></section>
+<section class="cards"><article><span>呼び出し回数</span><strong id="total">—</strong><small id="rate">— / 時間</small></article><article><span>稼働中モデル</span><strong id="loaded">—</strong><small id="installed">—</small></article><article><span>メモリ使用量</span><strong id="memory">—</strong><small id="cpu">—</small></article><article><span>取り込み済み履歴</span><strong id="imported">—</strong><small>Ollama アクセスログ</small></article></section>
 <section class="panel"><div class="panel-title"><h2>時間帯別の呼び出し</h2><span id="bucket-label"></span></div><canvas id="timeline" height="260"></canvas><div id="legend" class="legend"></div></section>
 <div class="grid"><section class="panel"><h2>モデル別の呼び出し</h2><div id="models" class="rank"></div></section><section class="panel"><h2>処理別の呼び出し</h2><div id="operations" class="rank"></div></section></div>
 <section class="panel"><h2>直近のリクエスト</h2><div class="scroll"><table><thead><tr><th>時刻</th><th>モデル</th><th>処理</th><th>結果</th><th>所要時間</th><th>記録元</th></tr></thead><tbody id="recent"></tbody></table></div></section></main>
-<footer>詳細なモデル名を含む記録は、Ollama の接続先をキャプチャプロキシへ変更した後から保存されます。プロンプト本文は保存しません。</footer><script src="/app.js"></script></body></html>
+<footer>詳細なモデル名を含む記録は、Ollama の接続先をキャプチャプロキシへ変更した後から保存されます。プロンプト本文は保存しません。</footer><script src="/app.js"></script><script src="/presence.js"></script></body></html>

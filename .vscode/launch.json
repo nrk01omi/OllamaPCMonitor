@@ -10,7 +10,7 @@
       "console": "integratedTerminal",
       "env": {
         "OLLAMA_URL": "http://127.0.0.1:11434",
-        "MONITOR_PORT": "11500",
+        "MONITOR_PORT": "11501",
         "PROXY_PORT": "11435",
         "PROXY_HOST": "0.0.0.0",
         "OLLAMA_LOG_DIR": "C:\\ollama\\logs"
