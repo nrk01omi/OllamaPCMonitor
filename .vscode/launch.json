@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Ollama PC Monitor を起動",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/server.js",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "OLLAMA_URL": "http://127.0.0.1:11434",
+        "MONITOR_PORT": "11500",
+        "PROXY_PORT": "11435",
+        "PROXY_HOST": "0.0.0.0",
+        "OLLAMA_LOG_DIR": "C:\\ollama\\logs"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ]
+    }
+  ]
+}

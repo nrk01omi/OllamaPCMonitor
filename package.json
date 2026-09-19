@@ -1,0 +1,12 @@
+{
+  "name": "ollama-pc-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Ollama request monitor and transparent proxy",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
