@@ -20,6 +20,23 @@ node server.js
 
 ブラウザで `http://127.0.0.1:11501` を開きます。起動時に直近35日間の既存ログを読み込み、以後は `data/requests.jsonl` に記録します。
 
+## 再起動
+Stop-ScheduledTask -TaskName OllamaPCMonitor
+Start-ScheduledTask -TaskName OllamaPCMonitor
+
+## 常時起動
+
+cd C:\Apps\OllamaPCMonitor
+powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1
+Start-ScheduledTask -TaskName OllamaPCMonitor
+
+## 常時起動解除
+powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1 -Uninstall
+
+## 状態確認
+Get-ScheduledTask -TaskName OllamaPCMonitor
+Get-Content C:\Apps\OllamaPCMonitor\data\monitor.log -Tail 50
+
 ## モデル別の詳細計測を有効にする
 
 モニタは `0.0.0.0:11435` に透明プロキシを起動します。Ollamaを利用するアプリの接続先を、現在の `http://<このPCのIP>:11434` から `http://<このPCのIP>:11435` へ変更してください。API仕様はそのままで、ストリーミング応答にも対応します。

@@ -21,6 +21,7 @@ function createPresence(opts) {
   const env = opts.env || process.env;
   const log = opts.log || (() => {});
   const version = opts.version || '0.0.0';
+  const onPowerEvent = opts.onPowerEvent || (() => {});
   const nksUrl = String(env.NKS_URL || '').replace(/\/+$/, '');
   const apiKey = env.NKS_API_KEY || '';
   const hostId = env.NKS_HOST_ID || '';
@@ -38,6 +39,14 @@ function createPresence(opts) {
   const timers = [];
   let heartbeatInFlight = false;
   let lastResumeAt = 0;
+  const power = {
+    startedAt: new Date().toISOString(),
+    lastSuspendAt: null,
+    lastResumeAt: null
+  };
+  function recordPowerEvent(type, timestamp = new Date().toISOString()) {
+    try { onPowerEvent({ type, timestamp }); } catch (error) { log('power event write failed:', error.message); }
+  }
 
   // ---- local addresses -------------------------------------------------------------------
   let lanAddresses = new Set();
@@ -200,11 +209,15 @@ function createPresence(opts) {
   function onResume() {
     if (Date.now() - lastResumeAt < 10000) return;
     lastResumeAt = Date.now();
+    power.lastResumeAt = new Date(lastResumeAt).toISOString();
+    recordPowerEvent('resume', power.lastResumeAt);
     sendHeartbeat();
   }
   // The PC is about to sleep: release the work declaration NOW (no delay, short timeout).
   // If this does not get through, NKS releases it when it sees the machine stop.
   function onSuspend() {
+    power.lastSuspendAt = new Date().toISOString();
+    recordPowerEvent('suspend', power.lastSuspendAt);
     if (!configured) return;
     nksRequest('POST', '/api/power/pc-work-hold', { host: hostId, minutes: 0 }, 3000).catch(() => {});
   }
@@ -241,6 +254,9 @@ function createPresence(opts) {
       hostId: configured ? hostId : null,
       nksUrl: configured ? nksUrl : null,
       probe: { alive, idleSec: alive ? probe.idleSec : null, locked: alive ? probe.locked : null, updatedAt: probe.updatedAt || null },
+      // This process only runs while Windows is awake. A live probe therefore means
+      // the PC is operating; the timestamps retain the most recent sleep cycle.
+      power: { operating: alive, startedAt: power.startedAt, lastSuspendAt: power.lastSuspendAt, lastResumeAt: power.lastResumeAt },
       standbyTimeoutMin,
       local: { busy: localBusy(now), lastAt: localLastAt ? new Date(localLastAt).toISOString() : null, model: localModel, decayMin },
       nks: { status: nksStatus(now), response: nks.response, receivedAt: nks.receivedAt, lastOkAt: nks.lastOkAt, lastAttemptAt: nks.lastAttemptAt, consecutiveFailures: nks.consecutiveFailures, lastError: nks.lastError }
@@ -255,6 +271,7 @@ function createPresence(opts) {
   }
 
   function start() {
+    recordPowerEvent('start', power.startedAt);
     refreshLanAddresses();
     spawnProbe();
     pollLocalOllama();
@@ -276,6 +293,7 @@ function createPresence(opts) {
   }
 
   function stop() {
+    recordPowerEvent('stop');
     stopped = true;
     timers.forEach(clearInterval);
     if (probeChild) probeChild.kill();

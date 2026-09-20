@@ -5,6 +5,8 @@ const path = require('node:path');
 const os = require('node:os');
 const readline = require('node:readline');
 const { createPresence } = require('./presence');
+const { getGpuStatus } = require('./gpu');
+const { createGpuServiceManager } = require('./gpu-services');
 
 const root = __dirname;
 
@@ -18,6 +20,7 @@ try {
 
 const dataDir = path.join(root, 'data');
 const eventFile = path.join(dataDir, 'requests.jsonl');
+const powerEventFile = path.join(dataDir, 'power-events.jsonl');
 const publicDir = path.join(root, 'public');
 const upstream = new URL(process.env.OLLAMA_URL || 'http://127.0.0.1:11434');
 // 11500 is taken by the dedicated Ollama that the local MCP server (ollama-mcp) starts, so the dashboard uses 11501.
@@ -35,10 +38,19 @@ const presence = createPresence({
   localOllamaUrl: process.env.LOCAL_OLLAMA_URL || 'http://127.0.0.1:11500',
   ollamaLogFile: path.join(logDir, 'ollama.out.log'),
   probeScript: path.join(root, 'probe.ps1'),
+  onPowerEvent: appendPowerEvent,
   log: (...args) => console.log('[presence]', ...args)
 });
 
+const gpuServices = createGpuServiceManager({
+  hostId: process.env.NKS_HOST_ID || '',
+  stateFile: path.join(dataDir, 'gpu-services-state.json'),
+  pauseFile: path.join(process.env.ProgramData || 'C:\\ProgramData', 'gpu-host-guard', 'intentional-pause.json'),
+  log: (...args) => console.log('[gpu-services]', ...args)
+});
+
 let events = [];
+let powerEvents = [];
 let imported = 0;
 let importError = '';
 
@@ -62,6 +74,13 @@ function appendEvent(event) {
   fs.appendFile(eventFile, JSON.stringify(event) + '\n', () => {});
 }
 
+function appendPowerEvent(event) {
+  const record = { type: event.type, timestamp: event.timestamp || new Date().toISOString() };
+  powerEvents.push(record);
+  if (powerEvents.length > 100000) powerEvents.splice(0, powerEvents.length - 100000);
+  fs.appendFile(powerEventFile, JSON.stringify(record) + '\n', () => {});
+}
+
 async function loadSavedEvents() {
   try {
     const stream = fs.createReadStream(eventFile, { encoding: 'utf8' });
@@ -70,6 +89,20 @@ async function loadSavedEvents() {
     }
   } catch (error) {
     if (error.code !== 'ENOENT') console.warn('Could not read monitor data:', error.message);
+  }
+}
+
+async function loadSavedPowerEvents() {
+  try {
+    const stream = fs.createReadStream(powerEventFile, { encoding: 'utf8' });
+    for await (const line of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
+      try {
+        const event = JSON.parse(line);
+        if (event && typeof event.type === 'string' && Number.isFinite(Date.parse(event.timestamp))) powerEvents.push(event);
+      } catch { /* ignore incomplete final line */ }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Could not read power history:', error.message);
   }
 }
 
@@ -119,9 +152,12 @@ function selectedEvents(rangeHours) {
   return events.filter((event) => Date.parse(event.timestamp) >= cutoff);
 }
 
-function aggregate(rangeHours) {
-  const relevant = selectedEvents(rangeHours);
-  const bucketMs = rangeHours <= 24 ? 3600_000 : rangeHours <= 168 ? 6 * 3600_000 : 24 * 3600_000;
+function aggregate(rangeHours, includeNonWork = false) {
+  const nonWorkOperations = new Set(['loaded-models', 'model-list']);
+  const relevant = selectedEvents(rangeHours).filter((event) => includeNonWork || !nonWorkOperations.has(event.operation));
+  // The short-range view is for checking idle-but-awake periods, so retain
+  // five-minute detail. Longer views are coarser to remain readable.
+  const bucketMs = rangeHours <= 24 ? 5 * 60_000 : rangeHours <= 168 ? 30 * 60_000 : 6 * 3600_000;
   const start = Math.floor((Date.now() - rangeHours * 3600_000) / bucketMs) * bucketMs;
   const buckets = new Map();
   const models = new Map();
@@ -140,6 +176,18 @@ function aggregate(rangeHours) {
   return { rangeHours, total: relevant.length, buckets: [...buckets.values()], models: [...models.values()].sort(sort), operations: [...operations.values()].sort(sort), recent: relevant.slice(-30).reverse(), imported, importError };
 }
 
+function powerHistory(rangeHours) {
+  const from = Date.now() - rangeHours * 3600_000;
+  // Keep one preceding event so the browser knows the state at the start of its range.
+  let previous = null;
+  const relevant = [];
+  for (const event of powerEvents) {
+    if (Date.parse(event.timestamp) < from) previous = event;
+    else relevant.push(event);
+  }
+  return { from: new Date(from).toISOString(), events: previous ? [previous, ...relevant] : relevant };
+}
+
 async function getOllama(pathname) {
   const response = await fetch(new URL(pathname, upstream));
   if (!response.ok) throw new Error(`Ollama returned ${response.status}`);
@@ -147,13 +195,14 @@ async function getOllama(pathname) {
 }
 
 async function liveStatus() {
-  const [loadedResult, tagsResult] = await Promise.allSettled([getOllama('/api/ps'), getOllama('/api/tags')]);
+  const [loadedResult, tagsResult, gpuResult] = await Promise.allSettled([getOllama('/api/ps'), getOllama('/api/tags'), getGpuStatus()]);
   const error = [loadedResult, tagsResult].find((r) => r.status === 'rejected');
   return {
     connected: !error,
     error: error ? error.reason.message : '',
     loaded: loadedResult.status === 'fulfilled' ? loadedResult.value.models || [] : [],
     installedModels: tagsResult.status === 'fulfilled' ? (tagsResult.value.models || []).length : 0,
+    gpu: gpuResult.status === 'fulfilled' ? gpuResult.value : null,
     host: upstream.href.replace(/\/$/, ''),
     cpuCount: os.cpus().length,
     memory: { total: os.totalmem(), free: os.freemem() }
@@ -209,10 +258,24 @@ async function handlePresenceApi(req, res, url) {
   if (url.pathname === '/monitor/api/presence' && req.method === 'GET') {
     return asJson(res, url.searchParams.has('refresh') ? await presence.refresh() : presence.getSnapshot());
   }
+  if (url.pathname === '/monitor/api/gpu-services' && req.method === 'GET') {
+    return asJson(res, await gpuServices.getStatus());
+  }
   if (url.pathname === '/monitor/api/work-hold' && req.method === 'POST') {
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'JSON が不正です' }, 400); }
-    try { return asJson(res, await presence.setWorkHold(input.minutes, input.reason)); }
+    try {
+      const snapshot = await presence.setWorkHold(input.minutes, input.reason);
+      let services;
+      try { services = await gpuServices.setWorkHold(input.minutes); }
+      catch (error) {
+        // A route fence without releasing the local GPU is worse than refusing
+        // the declaration, so undo the NKS declaration if task control failed.
+        await presence.setWorkHold(0).catch(() => {});
+        throw error;
+      }
+      return asJson(res, { ...snapshot, gpuServices: services });
+    }
     catch (error) {
       const status = error.code === 'BAD_REQUEST' ? 400 : error.code === 'UNCONFIGURED' ? 503 : 502;
       return asJson(res, { error: error.message, snapshot: presence.getSnapshot() }, status);
@@ -223,12 +286,13 @@ async function handlePresenceApi(req, res, url) {
 
 const monitor = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold') {
+  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services') {
     return handlePresenceApi(req, res, url).catch((error) => asJson(res, { error: error.message }, 500));
   }
-  if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24));
+  if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24, url.searchParams.get('include_non_work') === '1'));
+  if (url.pathname === '/monitor/api/power-history') return asJson(res, powerHistory(Number(url.searchParams.get('hours')) || 24));
   if (url.pathname === '/monitor/api/live') { try { return asJson(res, await liveStatus()); } catch (e) { return asJson(res, { connected: false, error: e.message }, 502); } }
-  if (url.pathname === '/monitor/api/config') return asJson(res, { monitorPort, proxyPort, proxyHost, logDir, upstream: upstream.href.replace(/\/$/, '') });
+  if (url.pathname === '/monitor/api/config') return asJson(res, { monitorPort, proxyPort, proxyHost, logDir, upstream: upstream.href.replace(/\/$/, ''), gpuServices: gpuServices.getSnapshot() });
   const file = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//, '');
   const target = path.resolve(publicDir, file);
   if (!target.startsWith(publicDir + path.sep) && target !== path.join(publicDir, 'index.html')) return res.writeHead(403).end();
@@ -239,6 +303,7 @@ const monitor = http.createServer(async (req, res) => {
 async function main() {
   await fsp.mkdir(dataDir, { recursive: true });
   await loadSavedEvents();
+  await loadSavedPowerEvents();
   monitor.listen(monitorPort, '127.0.0.1', () => console.log(`Monitor: http://127.0.0.1:${monitorPort}`));
   http.createServer(proxyRequest).listen(proxyPort, proxyHost, () => console.log(`Ollama capture proxy: http://${proxyHost}:${proxyPort} -> ${upstream.href}`));
   importOllamaLogs().then(() => console.log(`Imported ${imported} historic access-log events from ${logDir}`));
