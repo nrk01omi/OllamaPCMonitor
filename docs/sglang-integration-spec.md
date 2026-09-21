@@ -47,7 +47,7 @@ SGLang listens inside WSL2.  On every dashboard-driven SGLang start, `scripts/sy
 
 The Windows `portproxy` listener is not a SGLang readiness signal.  Start/stop checks inspect the listener inside WSL2, while API readiness is confirmed through `/health`.
 
-Qwen3.8 starts with `--context-length 81920`, `--mem-fraction-static 0.89`, and `--kv-cache-dtype nvfp4` to increase the usable context while reducing KV-cache VRAM consumption.  The runtime log must report the allocated KV cache dtype and token capacity after every configuration change.
+Qwen3.8 uses the validated RTX 5090 single-stream baseline: `--mem-fraction-static 0.90`, `--kv-cache-dtype fp8_e4m3`, `--max-running-requests 1`, and `--cuda-graph-max-bs-decode 1`.  It also enables `--reasoning-parser qwen3` and `--tool-call-parser qwen3_coder` so OpenAI-compatible clients receive structured reasoning and tool calls.  The runtime log must report the allocated KV cache dtype and token capacity after every configuration change.
 
 ### `GET /monitor/api/sglang-services`
 
