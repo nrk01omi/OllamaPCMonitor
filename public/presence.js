@@ -51,6 +51,7 @@
   let snap = null;
   let live = null;
   let gpuServices = null;
+  let sglangServices = null;
   let unreachable = false;
   let busy = false;
 
@@ -143,6 +144,73 @@
     }
   }
 
+  function createSglangPanel() {
+    const panel = document.createElement('section');
+    panel.className = 'agent-services-card';
+    panel.innerHTML = '<div class="agent-services-title"><span>SGLang モデル</span><small id="sglang-note">確認中</small></div><div id="sglang-list" class="agent-services-list"></div>';
+    $('agent-services-list').closest('section').after(panel);
+  }
+
+  function createSglangStartModal() {
+    const modal = document.createElement('div');
+    modal.id = 'sglang-start-modal'; modal.className = 'sglang-modal'; modal.hidden = true;
+    modal.setAttribute('role', 'dialog'); modal.setAttribute('aria-modal', 'true');
+    modal.innerHTML = '<div class="sglang-modal-card"><span class="sglang-spinner" aria-hidden="true"></span><h2>SGLang を起動しています</h2><p id="sglang-modal-detail">準備中です。完了まで操作しないでください。</p><ol id="sglang-modal-flow" class="sglang-modal-flow"></ol><small>初回は NVFP4 カーネルの準備に数分かかることがあります。この画面は自動で閉じます。</small></div>';
+    document.body.append(modal);
+  }
+
+  function renderSglangStartModal() {
+    if (!$('sglang-start-modal')) createSglangStartModal();
+    const modal = $('sglang-start-modal');
+    const starting = sglangServices && sglangServices.operation === 'starting';
+    modal.hidden = !starting;
+    if (!starting) return;
+    const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(sglangServices.startedAt || Date.now())) / 1000));
+    $('sglang-modal-detail').textContent = `${sglangServices.selected || 'SGLang'} を起動中（${elapsed} 秒）。完了まで操作しないでください。`;
+    const steps = ['GPU 解放を確認', 'WSL2 / SGLang プロセスを開始', 'モデル重みをロード', 'NVFP4 カーネルを準備', 'API の起動を確認'];
+    const active = elapsed < 8 ? 1 : elapsed < 45 ? 2 : elapsed < 180 ? 3 : 4;
+    $('sglang-modal-flow').replaceChildren(...steps.map((label, index) => {
+      const item = document.createElement('li'); item.className = index < active ? 'done' : index === active ? 'active' : ''; item.textContent = label; return item;
+    }));
+  }
+
+  function workHoldActive() {
+    return Boolean(sglangServices && sglangServices.holdUntil && Date.parse(sglangServices.holdUntil) > Date.now());
+  }
+
+  function renderSglangServices() {
+    if (!$('sglang-list')) createSglangPanel();
+    const list = $('sglang-list'); list.replaceChildren();
+    const declared = workHoldActive();
+    const starting = sglangServices && sglangServices.operation === 'starting';
+    const enabled = declared && sglangServices.gpuReleased;
+    $('sglang-note').textContent = !declared ? '作業宣言中のみ操作可能' : enabled ? `作業宣言中：${when(sglangServices.holdUntil)} まで操作可能` : (sglangServices.gpuReleaseDetail || 'GPU 解放を確認中です');
+    for (const model of (sglangServices && sglangServices.models) || []) {
+      const item = document.createElement('div');
+      item.className = `agent-service ${model.running ? 'running' : 'stopped'}`;
+      const name = document.createElement('b'); name.textContent = model.label;
+      const status = document.createElement('small'); status.textContent = `${model.running ? '起動中' : '停止中'} / :${model.port}`;
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'sglang-toggle'; button.textContent = model.running ? '停止' : '起動';
+      button.disabled = busy || starting || !enabled;
+      button.addEventListener('click', () => setSglangModel(model.running ? null : model.id));
+      item.append(name, status, button); list.append(item);
+    }
+  }
+
+  async function setSglangModel(model) {
+    busy = true; render(); renderSglangServices(); renderSglangStartModal();
+    try {
+      const response = await fetch('/monitor/api/sglang-services', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      sglangServices = data;
+      $('pr-message').className = 'pr-message';
+      $('pr-message').textContent = model ? 'SGLang モデルを切り替えました' : 'SGLang モデルを停止しました';
+    } catch (error) { $('pr-message').className = 'pr-message err'; $('pr-message').textContent = `失敗: ${error.message}`; }
+    finally { busy = false; render(); renderSglangServices(); renderSglangStartModal(); }
+  }
+
   function setStatus(text, kind, detail) {
     $('pr-status').textContent = text;
     $('pr-status').className = `pr-status ${kind}`;
@@ -214,9 +282,16 @@
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       gpuServices = await response.json();
     } catch { gpuServices = null; }
+    try {
+      const response = await fetch('/monitor/api/sglang-services', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      sglangServices = await response.json();
+    } catch { sglangServices = null; }
     render();
     renderGpu();
     renderGpuServices();
+    renderSglangServices();
+    renderSglangStartModal();
   }
 
   async function declare(minutes) {

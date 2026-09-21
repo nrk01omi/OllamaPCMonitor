@@ -58,6 +58,8 @@ node server.js
 
 NAS（NKS）がこの PC を勝手に寝かせないよう、PC 側から**測った値だけ**を 30 秒ごとに送ります（`POST /api/power/pc-presence`）。在席かどうか・あと何分で寝るかは NAS が判定し、画面は NAS の応答をそのまま表示します（時刻は JST）。契約は `pc-presence-v1` v1.1、作業指示は `docs/ollama-pc-monitor-work-order.md`。
 
+SGLang を RTX 5090 で安定運用するための GPU 排他・作業宣言連動は [SGLang 連携仕様](docs/sglang-integration-spec.md) を参照してください。
+
 | 構成 | 内容 |
 |---|---|
 | `probe.ps1` | 常駐 PowerShell 1 本。`GetLastInputInfo` の無操作秒数・ロック状態を 1 秒ごとに出力し、スリープ/復帰を通知 |

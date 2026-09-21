@@ -7,6 +7,7 @@ const readline = require('node:readline');
 const { createPresence } = require('./presence');
 const { getGpuStatus } = require('./gpu');
 const { createGpuServiceManager } = require('./gpu-services');
+const { createSglangServiceManager } = require('./sglang-services');
 
 const root = __dirname;
 
@@ -47,6 +48,11 @@ const gpuServices = createGpuServiceManager({
   stateFile: path.join(dataDir, 'gpu-services-state.json'),
   pauseFile: path.join(process.env.ProgramData || 'C:\\ProgramData', 'gpu-host-guard', 'intentional-pause.json'),
   log: (...args) => console.log('[gpu-services]', ...args)
+});
+const sglangServices = createSglangServiceManager({
+  scriptsDir: path.join(root, 'scripts'),
+  stateFile: path.join(dataDir, 'sglang-services-state.json'),
+  log: (...args) => console.log('[sglang-services]', ...args)
 });
 
 let events = [];
@@ -261,10 +267,34 @@ async function handlePresenceApi(req, res, url) {
   if (url.pathname === '/monitor/api/gpu-services' && req.method === 'GET') {
     return asJson(res, await gpuServices.getStatus());
   }
+  async function sglangStatus() {
+    const [sglang, gpu] = await Promise.all([sglangServices.status(), gpuServices.getStatus()]);
+    // A SGLang start is permitted only after every managed auxiliary service has
+    // stopped and released its health endpoint.  An unknown task state is not a
+    // safe substitute for a release confirmation.
+    const gpuReleased = !gpu.supported || (!gpu.taskError && gpu.services.every((service) => service.running === false && !service.health));
+    return { ...sglang, gpuReleased, gpuReleaseDetail: gpuReleased ? 'Whisper・Reranker は GPU を解放済みです' : 'Whisper・Reranker の停止と GPU 解放を確認中です' };
+  }
+  if (url.pathname === '/monitor/api/sglang-services' && req.method === 'GET') return asJson(res, await sglangStatus());
+  if (url.pathname === '/monitor/api/sglang-services' && req.method === 'POST') {
+    let input;
+    try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'invalid JSON' }, 400); }
+    try {
+      if (input.model) {
+        const before = await sglangStatus();
+        if (!before.gpuReleased) return asJson(res, { error: before.gpuReleaseDetail, ...before }, 409);
+        await sglangServices.select(input.model);
+      } else await sglangServices.stopAll();
+      return asJson(res, await sglangStatus());
+    } catch (error) { return asJson(res, { error: error.message }, error.code === 'BAD_REQUEST' ? 400 : error.code === 'NO_WORK_HOLD' || error.code === 'STARTING' ? 409 : 502); }
+  }
   if (url.pathname === '/monitor/api/work-hold' && req.method === 'POST') {
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'JSON が不正です' }, 400); }
     try {
+      // On release, stop the GPU-exclusive workload before allowing auxiliary
+      // services to resume.  This avoids a transient SGLang/Whisper overlap.
+      if (Number(input.minutes) === 0) await sglangServices.setWorkHold(0);
       const snapshot = await presence.setWorkHold(input.minutes, input.reason);
       let services;
       try { services = await gpuServices.setWorkHold(input.minutes); }
@@ -274,6 +304,9 @@ async function handlePresenceApi(req, res, url) {
         await presence.setWorkHold(0).catch(() => {});
         throw error;
       }
+      // Make the SGLang selector eligible only after Whisper/Reranker have
+      // successfully stopped.  Release has already stopped SGLang above.
+      if (Number(input.minutes) > 0) await sglangServices.setWorkHold(input.minutes);
       return asJson(res, { ...snapshot, gpuServices: services });
     }
     catch (error) {
@@ -286,7 +319,7 @@ async function handlePresenceApi(req, res, url) {
 
 const monitor = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services') {
+  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services' || url.pathname === '/monitor/api/sglang-services') {
     return handlePresenceApi(req, res, url).catch((error) => asJson(res, { error: error.message }, 500));
   }
   if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24, url.searchParams.get('include_non_work') === '1'));
