@@ -22,6 +22,7 @@ function createPresence(opts) {
   const log = opts.log || (() => {});
   const version = opts.version || '0.0.0';
   const onPowerEvent = opts.onPowerEvent || (() => {});
+  const onIdleEvent = opts.onIdleEvent || (() => {});
   const nksUrl = String(env.NKS_URL || '').replace(/\/+$/, '');
   const apiKey = env.NKS_API_KEY || '';
   const hostId = env.NKS_HOST_ID || '';
@@ -31,7 +32,7 @@ function createPresence(opts) {
 
   let stopped = false;
   let probeChild = null;
-  let probe = { idleSec: null, locked: null, updatedAt: 0 };
+  let probe = { idleSec: null, locked: null, foregroundProcess: null, updatedAt: 0 };
   let standbyTimeoutMin = null;
   let localLastAt = null;
   let localModel = null;
@@ -39,6 +40,7 @@ function createPresence(opts) {
   const timers = [];
   let heartbeatInFlight = false;
   let lastResumeAt = 0;
+  let lastInjectedInput = null;
   const power = {
     startedAt: new Date().toISOString(),
     lastSuspendAt: null,
@@ -46,6 +48,9 @@ function createPresence(opts) {
   };
   function recordPowerEvent(type, timestamp = new Date().toISOString()) {
     try { onPowerEvent({ type, timestamp }); } catch (error) { log('power event write failed:', error.message); }
+  }
+  function recordIdleEvent(event) {
+    try { onIdleEvent(event); } catch (error) { log('idle event write failed:', error.message); }
   }
 
   // ---- local addresses -------------------------------------------------------------------
@@ -153,8 +158,22 @@ function createPresence(opts) {
     child.once('error', (error) => { log('probe error:', error.message); onGone(); });
     child.once('exit', onGone);
     readline.createInterface({ input: child.stdout }).on('line', (line) => {
-      const sample = line.match(/^S (\d+) ([01])$/);
-      if (sample) { probe = { idleSec: Number(sample[1]), locked: sample[2] === '1', updatedAt: Date.now() }; return; }
+      const sample = line.match(/^S (\d+) ([01])(?: ([A-Za-z0-9._-]*))?$/);
+      if (sample) {
+        const now = Date.now();
+        const idleSec = Number(sample[1]);
+        const foregroundProcess = sample[3] || null;
+        // A decrease is the only signal GetLastInputInfo provides for an input reset.
+        // Record every reset so short periodic synthetic input is visible in the timeline.
+        if (probeAlive(now) && probe.idleSec !== null && idleSec < probe.idleSec) {
+          const injected = lastInjectedInput && now - lastInjectedInput.at <= 5000 ? lastInjectedInput : null;
+          recordIdleEvent({ type: 'idle-reset', timestamp: new Date(now).toISOString(), previous_idle_sec: probe.idleSec, idle_sec: idleSec, session_locked: sample[2] === '1', foreground_process: foregroundProcess, injected_input: injected && injected.kind, injected_input_at: injected && new Date(injected.at).toISOString() });
+        }
+        probe = { idleSec, locked: sample[2] === '1', foregroundProcess, updatedAt: now };
+        return;
+      }
+      const injected = line.match(/^I (keyboard|mouse) injected$/);
+      if (injected) { lastInjectedInput = { kind: injected[1], at: Date.now() }; return; }
       if (line === 'E suspend') onSuspend();
       else if (line === 'E resume') onResume();
     });
@@ -253,7 +272,7 @@ function createPresence(opts) {
       now, version, configured,
       hostId: configured ? hostId : null,
       nksUrl: configured ? nksUrl : null,
-      probe: { alive, idleSec: alive ? probe.idleSec : null, locked: alive ? probe.locked : null, updatedAt: probe.updatedAt || null },
+      probe: { alive, idleSec: alive ? probe.idleSec : null, locked: alive ? probe.locked : null, foregroundProcess: alive ? probe.foregroundProcess : null, updatedAt: probe.updatedAt || null },
       // This process only runs while Windows is awake. A live probe therefore means
       // the PC is operating; the timestamps retain the most recent sleep cycle.
       power: { operating: alive, startedAt: power.startedAt, lastSuspendAt: power.lastSuspendAt, lastResumeAt: power.lastResumeAt },

@@ -23,6 +23,7 @@ try {
 const dataDir = path.join(root, 'data');
 const eventFile = path.join(dataDir, 'requests.jsonl');
 const powerEventFile = path.join(dataDir, 'power-events.jsonl');
+const idleEventFile = path.join(dataDir, 'idle-events.jsonl');
 const publicDir = path.join(root, 'public');
 const upstream = new URL(process.env.OLLAMA_URL || 'http://127.0.0.1:11434');
 // 11500 is taken by the dedicated Ollama that the local MCP server (ollama-mcp) starts, so the dashboard uses 11501.
@@ -41,6 +42,7 @@ const presence = createPresence({
   ollamaLogFile: path.join(logDir, 'ollama.out.log'),
   probeScript: path.join(root, 'probe.ps1'),
   onPowerEvent: appendPowerEvent,
+  onIdleEvent: appendIdleEvent,
   log: (...args) => console.log('[presence]', ...args)
 });
 
@@ -63,6 +65,7 @@ const sglangServices = createSglangServiceManager({
 
 let events = [];
 let powerEvents = [];
+let idleEvents = [];
 let imported = 0;
 let importError = '';
 
@@ -93,6 +96,22 @@ function appendPowerEvent(event) {
   fs.appendFile(powerEventFile, JSON.stringify(record) + '\n', () => {});
 }
 
+function appendIdleEvent(event) {
+  const record = {
+    type: event.type,
+    timestamp: event.timestamp || new Date().toISOString(),
+    previous_idle_sec: Number(event.previous_idle_sec),
+    idle_sec: Number(event.idle_sec),
+    session_locked: Boolean(event.session_locked),
+    foreground_process: typeof event.foreground_process === 'string' ? event.foreground_process : null,
+    injected_input: event.injected_input === 'keyboard' || event.injected_input === 'mouse' ? event.injected_input : null,
+    injected_input_at: typeof event.injected_input_at === 'string' ? event.injected_input_at : null
+  };
+  idleEvents.push(record);
+  if (idleEvents.length > 100000) idleEvents.splice(0, idleEvents.length - 100000);
+  fs.appendFile(idleEventFile, JSON.stringify(record) + '\n', () => {});
+}
+
 async function loadSavedEvents() {
   try {
     const stream = fs.createReadStream(eventFile, { encoding: 'utf8' });
@@ -115,6 +134,20 @@ async function loadSavedPowerEvents() {
     }
   } catch (error) {
     if (error.code !== 'ENOENT') console.warn('Could not read power history:', error.message);
+  }
+}
+
+async function loadSavedIdleEvents() {
+  try {
+    const stream = fs.createReadStream(idleEventFile, { encoding: 'utf8' });
+    for await (const line of readline.createInterface({ input: stream, crlfDelay: Infinity })) {
+      try {
+        const event = JSON.parse(line);
+        if (event && event.type === 'idle-reset' && Number.isFinite(Date.parse(event.timestamp))) idleEvents.push(event);
+      } catch { /* ignore incomplete final line */ }
+    }
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('Could not read idle history:', error.message);
   }
 }
 
@@ -198,6 +231,11 @@ function powerHistory(rangeHours) {
     else relevant.push(event);
   }
   return { from: new Date(from).toISOString(), events: previous ? [previous, ...relevant] : relevant };
+}
+
+function idleHistory(rangeHours) {
+  const from = Date.now() - rangeHours * 3600_000;
+  return { from: new Date(from).toISOString(), events: idleEvents.filter((event) => Date.parse(event.timestamp) >= from) };
 }
 
 async function getOllama(pathname) {
@@ -330,6 +368,7 @@ const monitor = http.createServer(async (req, res) => {
   }
   if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24, url.searchParams.get('include_non_work') === '1'));
   if (url.pathname === '/monitor/api/power-history') return asJson(res, powerHistory(Number(url.searchParams.get('hours')) || 24));
+  if (url.pathname === '/monitor/api/idle-history') return asJson(res, idleHistory(Number(url.searchParams.get('hours')) || 24));
   if (url.pathname === '/monitor/api/live') { try { return asJson(res, await liveStatus()); } catch (e) { return asJson(res, { connected: false, error: e.message }, 502); } }
   if (url.pathname === '/monitor/api/config') return asJson(res, { monitorPort, proxyPort, proxyHost, logDir, upstream: upstream.href.replace(/\/$/, ''), gpuServices: gpuServices.getSnapshot() });
   const file = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^\//, '');
