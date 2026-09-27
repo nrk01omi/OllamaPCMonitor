@@ -184,7 +184,8 @@
     const declared = workHoldActive();
     const starting = sglangServices && sglangServices.operation === 'starting';
     const enabled = declared && sglangServices.gpuReleased;
-    $('sglang-note').textContent = !declared ? '作業宣言中のみ操作可能' : enabled ? `作業宣言中：${when(sglangServices.holdUntil)} まで操作可能` : (sglangServices.gpuReleaseDetail || 'GPU 解放を確認中です');
+    const sleepGuard = sglangServices && sglangServices.sleepBlocked ? ' / 自動スリープ抑止中' : '';
+    $('sglang-note').textContent = !declared ? `作業宣言中のみ操作可能${sleepGuard}` : enabled ? `作業宣言中：${when(sglangServices.holdUntil)} まで操作可能${sleepGuard}` : `${sglangServices.gpuReleaseDetail || 'GPU 解放を確認中です'}${sleepGuard}`;
     for (const model of (sglangServices && sglangServices.models) || []) {
       const item = document.createElement('div');
       item.className = `agent-service ${model.running ? 'running' : 'stopped'}`;

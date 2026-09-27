@@ -60,6 +60,8 @@ NAS（NKS）がこの PC を勝手に寝かせないよう、PC 側から**測�
 
 SGLang を RTX 5090 で安定運用するための GPU 排他・作業宣言連動は [SGLang 連携仕様](docs/sglang-integration-spec.md) を参照してください。
 
+SGLang がモデルをロード中または API が稼働中の間は、`SetThreadExecutionState(ES_SYSTEM_REQUIRED)` を使用して Windows のアイドル起因の自動スリープを抑止します。SGLang 停止・起動失敗時には解除され、手動スリープは妨げません。
+
 | 構成 | 内容 |
 |---|---|
 | `probe.ps1` | 常駐 PowerShell 1 本。`GetLastInputInfo` の無操作秒数・ロック状態を 1 秒ごとに出力し、スリープ/復帰を通知 |

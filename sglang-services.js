@@ -15,12 +15,13 @@ function runScript(script) {
   }));
 }
 
-function createSglangServiceManager({ scriptsDir, stateFile, log = () => {} }) {
+function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onActivityChange = () => {} }) {
   let state = { holdUntil: null, operation: 'idle', selected: null, startedAt: null, lastError: null };
   let timer = null;
   let serial = Promise.resolve();
   try { state = { ...state, ...JSON.parse(fs.readFileSync(stateFile, 'utf8')) }; } catch { /* first start */ }
   const save = () => fs.writeFileSync(stateFile, JSON.stringify(state));
+  const reportActivity = (active) => Promise.resolve(onActivityChange(active)).catch((error) => log('sleep guard update failed:', error.message));
   const scheduleStop = () => {
     if (timer) clearTimeout(timer);
     if (!state.holdUntil) return;
@@ -43,7 +44,9 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {} }) {
     } else if (state.operation === 'starting' && state.startedAt && Date.now() - Date.parse(state.startedAt) > 10 * 60 * 1000) {
       state.operation = 'failed'; state.lastError = '10 分以内に SGLang API が起動しませんでした。ログを確認してください。'; save();
     }
-    return { models, holdUntil: state.holdUntil, operation: state.operation, selected: state.selected, startedAt: state.startedAt, lastError: state.lastError };
+    const active = state.operation === 'starting' || models.some((model) => model.running);
+    reportActivity(active);
+    return { models, holdUntil: state.holdUntil, operation: state.operation, selected: state.selected, startedAt: state.startedAt, lastError: state.lastError, sleepBlocked: active };
   }
   async function stop(id) {
     const model = MODELS[id];
@@ -57,6 +60,7 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {} }) {
       if (clearHold) state.holdUntil = null;
       state.operation = 'idle'; state.selected = null; state.startedAt = null; state.lastError = null; save();
       if (timer) { clearTimeout(timer); timer = null; }
+      await reportActivity(false);
       return status();
     });
   }
@@ -72,11 +76,12 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {} }) {
       if (state.operation === 'running' && state.selected === id && current.models.find((model) => model.id === id)?.running) return current;
       await Promise.all(Object.keys(MODELS).filter((other) => other !== id).map((other) => stop(other)));
       state.operation = 'starting'; state.selected = id; state.startedAt = new Date().toISOString(); state.lastError = null; save();
+      await reportActivity(true);
       try {
         await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
         await runScript(require('node:path').join(scriptsDir, MODELS[id].start));
       }
-      catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); throw error; }
+      catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); await reportActivity(false); throw error; }
       return status();
     });
   }
@@ -86,6 +91,9 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {} }) {
     return minutes > 0 ? status() : stopAll({ clearHold: true });
   }
   scheduleStop();
+  // Reconcile persisted state with the health endpoints immediately after a
+  // monitor restart; do not wait for somebody to open the dashboard.
+  status().catch((error) => log('initial SGLang status failed:', error.message));
   return { status, select, stopAll, setWorkHold };
 }
 

@@ -8,6 +8,7 @@ const { createPresence } = require('./presence');
 const { getGpuStatus } = require('./gpu');
 const { createGpuServiceManager } = require('./gpu-services');
 const { createSglangServiceManager } = require('./sglang-services');
+const { createSleepGuard } = require('./sleep-guard');
 
 const root = __dirname;
 
@@ -49,10 +50,15 @@ const gpuServices = createGpuServiceManager({
   pauseFile: path.join(process.env.ProgramData || 'C:\\ProgramData', 'gpu-host-guard', 'intentional-pause.json'),
   log: (...args) => console.log('[gpu-services]', ...args)
 });
+const sleepGuard = createSleepGuard({
+  script: path.join(root, 'scripts', 'sleep-guard.ps1'),
+  log: (...args) => console.log('[sleep-guard]', ...args)
+});
 const sglangServices = createSglangServiceManager({
   scriptsDir: path.join(root, 'scripts'),
   stateFile: path.join(dataDir, 'sglang-services-state.json'),
-  log: (...args) => console.log('[sglang-services]', ...args)
+  log: (...args) => console.log('[sglang-services]', ...args),
+  onActivityChange: (active) => sleepGuard.setActive(active)
 });
 
 let events = [];
@@ -337,11 +343,12 @@ async function main() {
   await fsp.mkdir(dataDir, { recursive: true });
   await loadSavedEvents();
   await loadSavedPowerEvents();
+  await loadSavedIdleEvents();
   monitor.listen(monitorPort, '127.0.0.1', () => console.log(`Monitor: http://127.0.0.1:${monitorPort}`));
   http.createServer(proxyRequest).listen(proxyPort, proxyHost, () => console.log(`Ollama capture proxy: http://${proxyHost}:${proxyPort} -> ${upstream.href}`));
   importOllamaLogs().then(() => console.log(`Imported ${imported} historic access-log events from ${logDir}`));
   presence.start();
   console.log(presence.getSnapshot().configured ? `NKS presence: host ${process.env.NKS_HOST_ID} -> ${process.env.NKS_URL}` : 'NKS presence: not configured (set NKS_URL / NKS_API_KEY / NKS_HOST_ID); local measurements only');
 }
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { presence.stop(); process.exit(0); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { sleepGuard.setActive(false); presence.stop(); process.exit(0); });
 main().catch((error) => { console.error(error); process.exitCode = 1; });
