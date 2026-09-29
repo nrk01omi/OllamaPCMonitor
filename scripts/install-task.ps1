@@ -22,6 +22,17 @@ if (([int][bool]$Uninstall + [int][bool]$EnableSelfHeal + [int][bool]$DisableSel
 }
 
 $taskName = 'OllamaPCMonitor'
+
+# The task runs at the highest run level.  Updating or removing that task also
+# requires an elevated PowerShell process; otherwise Task Scheduler returns the
+# unhelpful HRESULT 0x80070005 (Access is denied).
+$currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+$currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
+$isAdministrator = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdministrator) {
+    throw "Administrator privileges are required to manage '$taskName'. Open PowerShell with 'Run as administrator', then run this script again."
+}
+
 if ($Uninstall) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
     Write-Host "Removed task '$taskName'."
