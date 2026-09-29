@@ -25,13 +25,27 @@ if (([int][bool]$Uninstall + [int][bool]$EnableSelfHeal + [int][bool]$DisableSel
 $taskName = 'OllamaPCMonitor'
 
 # The task runs at the highest run level.  Updating or removing that task also
-# requires an elevated PowerShell process; otherwise Task Scheduler returns the
-# unhelpful HRESULT 0x80070005 (Access is denied).
+# requires an elevated PowerShell process.  Re-launch ourselves so this works
+# from the VS Code launch configuration as well as a regular terminal.
 $currentIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $currentPrincipal = [Security.Principal.WindowsPrincipal]::new($currentIdentity)
 $isAdministrator = $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdministrator) {
-    throw "Administrator privileges are required to manage '$taskName'. Open PowerShell with 'Run as administrator', then run this script again."
+    $elevatedArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath)
+    if ($Uninstall) {
+        $elevatedArguments += '-Uninstall'
+    } elseif ($EnableSelfHeal) {
+        $elevatedArguments += '-EnableSelfHeal'
+    } elseif ($DisableSelfHeal) {
+        $elevatedArguments += '-DisableSelfHeal'
+    }
+
+    Write-Host "Requesting administrator approval to manage '$taskName'..."
+    $elevated = Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -PassThru -ArgumentList $elevatedArguments
+    if ($elevated.ExitCode -ne 0) {
+        throw "Elevated task management failed with exit code $($elevated.ExitCode)."
+    }
+    return
 }
 
 if ($Uninstall) {
