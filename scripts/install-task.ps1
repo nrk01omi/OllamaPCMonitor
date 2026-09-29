@@ -65,13 +65,14 @@ function Set-SelfHeal {
     $definition = $task.Definition
     $triggers = $definition.Triggers
     $ids = @('OllamaPCMonitor-SelfHeal-Time', 'OllamaPCMonitor-SelfHeal-RemoteConnect', 'OllamaPCMonitor-SelfHeal-SessionUnlock')
+    $principalAccount = ($definition.Principal.UserId -split '\\')[-1]
 
     # Iterate backward because removing a trigger shifts subsequent COM indices.
     for ($i = $triggers.Count; $i -ge 1; $i--) {
         $existing = $triggers.Item($i)
         $isLegacyTime = $existing.Type -eq 1 -and $existing.Repetition.Interval -eq 'PT5M' -and -not $existing.Repetition.Duration
         $isLegacySession = $existing.Type -eq 11 -and $existing.StateChange -in @(3, 8) -and `
-            $existing.UserId -eq $definition.Principal.UserId
+            ($existing.UserId -split '\\')[-1] -eq $principalAccount
         if (($ids -contains $existing.Id) -or ($isLegacyTime -and -not $existing.Id) -or ($isLegacySession -and -not $existing.Id)) {
             $triggers.Remove($i)
         }
