@@ -20,10 +20,16 @@
       ]
     },
     {
-      "name": "Apply Ollama PC Monitor (restart service)",
+      "name": "Apply Ollama PC Monitor (install/update and restart)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\restart-monitor.ps1\""
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\apply-task.ps1\""
+    },
+    {
+      "name": "Disable Ollama PC Monitor task self-heal",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\install-task.ps1\" -DisableSelfHeal"
     }
   ]
 }
