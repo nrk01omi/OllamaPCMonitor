@@ -23,13 +23,13 @@
       "name": "Apply Ollama PC Monitor (install/update and restart)",
       "type": "node-terminal",
       "request": "launch",
-      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\apply-task.ps1\""
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\run-task-admin.ps1\" -Action Apply"
     },
     {
       "name": "Disable Ollama PC Monitor task self-heal",
       "type": "node-terminal",
       "request": "launch",
-      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\install-task.ps1\" -DisableSelfHeal"
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\run-task-admin.ps1\" -Action DisableSelfHeal"
     }
   ]
 }

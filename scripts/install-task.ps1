@@ -1,5 +1,6 @@
 <#
   Registers "OllamaPCMonitor" in Task Scheduler: start at logon of the current user (auto-logon is enabled on this PC).
+  Run directly from an elevated PowerShell, or use the VS Code menu which prompts for elevation.
   Install/update:     powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1
   Apply to task:      powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1 -EnableSelfHeal
   Undo self-heal:     powershell -ExecutionPolicy Bypass -File scripts\install-task.ps1 -DisableSelfHeal
