@@ -199,6 +199,9 @@ function createPresence(opts) {
       }
       if (!body || typeof body !== 'object') throw new Error('NKS の応答が JSON ではありません');
       Object.assign(nks, { response: body, receivedAt: Date.now(), lastOkAt: new Date().toISOString(), consecutiveFailures: 0, lastError: null });
+      if (Array.isArray(body.sleep_blocked_by)) {
+        opts.onWorkHoldChange?.(body.sleep_blocked_by.includes('work_hold') ? body.work_hold_until : null);
+      }
       return body;
     } catch (error) {
       nks.consecutiveFailures++;
@@ -237,6 +240,7 @@ function createPresence(opts) {
   function onSuspend() {
     power.lastSuspendAt = new Date().toISOString();
     recordPowerEvent('suspend', power.lastSuspendAt);
+    opts.onWorkHoldChange?.(null);
     if (!configured) return;
     nksRequest('POST', '/api/power/pc-work-hold', { host: hostId, minutes: 0 }, 3000).catch(() => {});
   }
@@ -246,7 +250,9 @@ function createPresence(opts) {
     if (!Number.isInteger(minutes) || minutes < 0 || minutes > 480) { const error = new Error('minutes は 0〜480 の整数です'); error.code = 'BAD_REQUEST'; throw error; }
     const body = { host: hostId, minutes };
     if (minutes > 0 && typeof reason === 'string' && reason.trim()) body.reason = reason.trim().slice(0, 100);
-    await nksRequest('POST', '/api/power/pc-work-hold', body);
+    const response = await nksRequest('POST', '/api/power/pc-work-hold', body);
+    // Also cover NKS responses that omit sleep_blocked_by on this endpoint.
+    if (!Array.isArray(response.sleep_blocked_by)) opts.onWorkHoldChange?.(minutes > 0 ? response.work_hold_until || new Date(Date.now() + minutes * 60000).toISOString() : null);
     return getSnapshot();
   }
 

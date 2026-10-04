@@ -53,3 +53,34 @@
 
 **未決の事項**
 - NKS 側実装の完了タイミング（確認中）
+
+---
+
+## 2026-09-21（SGLang 連携実装）
+
+**実施したこと（コミット済み）**
+- `sglang-services.js`: SGLangServiceManager 実装（select/stopAll/setWorkHold/status）
+- `server.js`: sglangServiceManager 組み込み・`/monitor/api/sglang-services` GET/POST 追加
+- `public/presence.js` / `public/style.css`: SGLang パネル UI 追加
+- SGLang 起動 PowerShell / bash スクリプト（Qwen3.8・Qwen3Coder）追加
+- `docs/sglang-integration-spec.md`: 仕様書追加
+- コミット群: `014d6f7`〜`e8f1280`（計5コミット）
+
+**残件 / 次にやること**
+1. `scripts\install-task.ps1` でタスクスケジューラ登録
+2. 実機検証 §7（画面ロック・スリープ復帰・実 NAS 疎通）
+3. SGLang 連携の実機検証
+4. 未追跡ファイル（`data/`・`docs/sglang_5090_qwen3.827b.md`・`scripts/launch-qwen38-sglang.sh`）のコミット判断
+
+**未決の事項**
+- 実装差分（ポート変更・ローカル MCP 検知方式）のオーナー承認
+
+---
+
+## 2026-09-27
+
+**やり取りの流れ**
+- セッション開始直後に `/record-progress`。実装作業なし。
+- git log にて 2026-09-21 以降のコミット 5 件を確認（SGLang 連携すべて確定済み）
+
+**残件（変更なし）** — 上記 2026-09-21 の残件 1〜4 が継続中

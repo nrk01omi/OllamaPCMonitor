@@ -17,3 +17,12 @@
 - 検証済み（モック NKS）: 心拍/作業宣言/ローカル占有/NAS 断と自動復帰/UI(JST)/不正 Origin 拒否。**未検証（実機が必要）**: 画面ロック時の `session_locked`、スリープ直前の解除送信、実 NAS との疎通
 - 残件: ①~~`NKS_API_KEY` 受領 → 設定済み（.env 確認済み）~~ ②`scripts\install-task.ps1` 実行（タスク登録は未実施）③実機で指示書 §7 の 1〜7 を確認 ④コミット
 - *新セッション開始（2026-09-19）: 作業なし。.env に NKS_API_KEY 設定済みを確認。残件は②③④のみ。*
+
+### 2026-09-21（SGLang 連携実装）
+- `sglang-services.js` / `server.js` 更新 / `public/presence.js` SGLang パネル追加 / `public/style.css` 更新 / SGLang 起動 PowerShell & bash スクリプト追加 / `docs/sglang-integration-spec.md` 追加 → 複数コミットで確定済み
+- 最新コミット: `e8f1280` Label legacy vLLM launchers（2026-09-27 時点）
+- 未追跡: `data/`・`docs/sglang_5090_qwen3.827b.md`・`scripts/launch-qwen38-sglang.sh`
+- 残件: ①タスクスケジューラ登録（`scripts\install-task.ps1`）②実機検証 §7 ③SGLang 実機検証 ④未追跡ファイルのコミット判断
+
+### 2026-09-27
+- セッション開始直後に `/record-progress`。実装作業なし。残件は上記と同じ。

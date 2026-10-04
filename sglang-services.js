@@ -5,7 +5,8 @@ const { execFile } = require('node:child_process');
 
 const MODELS = {
   qwen38: { label: 'Qwen3.8-27B', port: 30000, start: 'Start-Qwen38-SGLang.ps1', stop: 'Stop-Qwen38-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen38.pid' },
-  qwen3coder: { label: 'Qwen3-Coder-30B', port: 30001, start: 'Start-Qwen3Coder-SGLang.ps1', stop: 'Stop-Qwen3Coder-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen3coder.pid' }
+  qwen3coder: { label: 'Qwen3-Coder-30B', port: 30001, start: 'Start-Qwen3Coder-SGLang.ps1', stop: 'Stop-Qwen3Coder-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen3coder.pid' },
+  strata128k: { label: 'Qwen3.8-Flash-Next / Strata 128K', port: 8082, start: 'Start-Strata-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') }
 };
 
 function runScript(script) {
@@ -78,7 +79,7 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onA
       state.operation = 'starting'; state.selected = id; state.startedAt = new Date().toISOString(); state.lastError = null; save();
       await reportActivity(true);
       try {
-        await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
+        if (id !== 'strata128k') await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
         await runScript(require('node:path').join(scriptsDir, MODELS[id].start));
       }
       catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); await reportActivity(false); throw error; }

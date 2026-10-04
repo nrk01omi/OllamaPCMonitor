@@ -1,0 +1,195 @@
+[
+ {
+  "context": 131072,
+  "config_args": [
+   "--pack",
+   "D:\\Strata-data\\packs\\iq2_xs",
+   "--native",
+   "D:\\Strata-data\\models\\IQ2_XS\\Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "--ple-gguf",
+   "D:\\Strata-data\\models\\IQ2_XS\\Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00002-of-00002.gguf",
+   "--expert-profile",
+   "C:\\Apps\\Strata\\data\\expert-profile.bin",
+   "--expert-cache",
+   "auto",
+   "--prefill",
+   "auto",
+   "--spec",
+   "4",
+   "--spec-min-p",
+   "0.5",
+   "--mtp",
+   "D:\\Strata-data\\mtp\\rt",
+   "--max-context",
+   "131072",
+   "--kv",
+   "int8",
+   "--kv-resident",
+   "32768"
+  ],
+  "baseline_before": {
+   "ram_used_gib": 15.904693603515625,
+   "commit_used_gib": 22.843727111816406
+  },
+  "runs": [
+   {
+    "target": 65536,
+    "prompt_tokens": 96264,
+    "gen": 63,
+    "prompt_tps": 5617.4,
+    "decode_tps": 163.8,
+    "prompt_ms": 17136.7,
+    "decode_ms": 384.6,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 96264,
+     "prompt_ms": 17136.7,
+     "prompt_per_token_ms": 0.178,
+     "prompt_per_second": 5617.4,
+     "predicted_n": 63,
+     "predicted_ms": 384.6,
+     "predicted_per_token_ms": 6.105,
+     "predicted_per_second": 163.8,
+     "draft_n": 54,
+     "draft_n_accepted": 36,
+     "at": 1791119749
+    }
+   },
+   {
+    "target": 65536,
+    "prompt_tokens": 96261,
+    "gen": 200,
+    "prompt_tps": 5576.8,
+    "decode_tps": 209.2,
+    "prompt_ms": 17260.9,
+    "decode_ms": 956.0,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 96261,
+     "prompt_ms": 17260.9,
+     "prompt_per_token_ms": 0.179,
+     "prompt_per_second": 5576.8,
+     "predicted_n": 200,
+     "predicted_ms": 956.0,
+     "predicted_per_token_ms": 4.78,
+     "predicted_per_second": 209.2,
+     "draft_n": 155,
+     "draft_n_accepted": 132,
+     "at": 1791119768
+    }
+   },
+   {
+    "target": 65536,
+    "prompt_tokens": 96262,
+    "gen": 63,
+    "prompt_tps": 5530.4,
+    "decode_tps": 184.6,
+    "prompt_ms": 17406.1,
+    "decode_ms": 341.2,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 96262,
+     "prompt_ms": 17406.1,
+     "prompt_per_token_ms": 0.181,
+     "prompt_per_second": 5530.4,
+     "predicted_n": 63,
+     "predicted_ms": 341.2,
+     "predicted_per_token_ms": 5.416,
+     "predicted_per_second": 184.6,
+     "draft_n": 51,
+     "draft_n_accepted": 39,
+     "at": 1791119786
+    }
+   },
+   {
+    "target": 81000,
+    "prompt_tokens": 118968,
+    "gen": 34,
+    "prompt_tps": 5402.3,
+    "decode_tps": 171.6,
+    "prompt_ms": 22021.6,
+    "decode_ms": 198.1,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 118968,
+     "prompt_ms": 22021.6,
+     "prompt_per_token_ms": 0.185,
+     "prompt_per_second": 5402.3,
+     "predicted_n": 34,
+     "predicted_ms": 198.1,
+     "predicted_per_token_ms": 5.826,
+     "predicted_per_second": 171.6,
+     "draft_n": 31,
+     "draft_n_accepted": 21,
+     "at": 1791119808
+    }
+   },
+   {
+    "target": 81000,
+    "prompt_tokens": 118968,
+    "gen": 63,
+    "prompt_tps": 5382.8,
+    "decode_tps": 175.1,
+    "prompt_ms": 22101.4,
+    "decode_ms": 359.8,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 118968,
+     "prompt_ms": 22101.4,
+     "prompt_per_token_ms": 0.186,
+     "prompt_per_second": 5382.8,
+     "predicted_n": 63,
+     "predicted_ms": 359.8,
+     "predicted_per_token_ms": 5.711,
+     "predicted_per_second": 175.1,
+     "draft_n": 52,
+     "draft_n_accepted": 37,
+     "at": 1791119831
+    }
+   },
+   {
+    "target": 81000,
+    "prompt_tokens": 118965,
+    "gen": 37,
+    "prompt_tps": 5380.3,
+    "decode_tps": 167.9,
+    "prompt_ms": 22111.3,
+    "decode_ms": 220.4,
+    "raw": {
+     "cache_n": 0,
+     "prompt_n": 118965,
+     "prompt_ms": 22111.3,
+     "prompt_per_token_ms": 0.186,
+     "prompt_per_second": 5380.3,
+     "predicted_n": 37,
+     "predicted_ms": 220.4,
+     "predicted_per_token_ms": 5.957,
+     "predicted_per_second": 167.9,
+     "draft_n": 29,
+     "draft_n_accepted": 20,
+     "at": 1791119853
+    }
+   }
+  ],
+  "load_s": 15.2,
+  "after_load": {
+   "t": 1791119730.8749943,
+   "ram_used_gib": 53.188804626464844,
+   "commit_used_gib": 90.81998062133789,
+   "vram_mib": 31022.0,
+   "power_w": 42.47,
+   "temp_c": 50.0,
+   "util": 0.0
+  },
+  "peak_load": {
+   "ram_used_gib": 53.2,
+   "commit_used_gib": 90.87,
+   "vram_mib": 31022.0
+  },
+  "peak_inference": {
+   "ram_used_gib": 54.25,
+   "commit_used_gib": 92.06,
+   "vram_mib": 31114.0
+  }
+ }
+]

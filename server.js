@@ -35,6 +35,16 @@ const logDir = process.env.OLLAMA_LOG_DIR || 'C:\\ollama\\logs';
 // requests (possibly from the NAS), which presence.js does not treat as local use.
 const upstreamIsLoopback = upstream.hostname === '127.0.0.1';
 
+const sleepGuard = createSleepGuard({
+  script: path.join(root, 'scripts', 'sleep-guard.ps1'),
+  log: (...args) => console.log('[sleep-guard]', ...args)
+});
+// Keep an unexpired declaration across monitor restarts, including while NKS
+// is temporarily unreachable. The next NKS response reconciles this state.
+try {
+  const saved = JSON.parse(fs.readFileSync(path.join(dataDir, 'sglang-services-state.json'), 'utf8'));
+  sleepGuard.setWorkHoldUntil(saved.holdUntil);
+} catch { /* no saved declaration */ }
 const presence = createPresence({
   env: process.env,
   version: require('./package.json').version,
@@ -43,6 +53,7 @@ const presence = createPresence({
   probeScript: path.join(root, 'probe.ps1'),
   onPowerEvent: appendPowerEvent,
   onIdleEvent: appendIdleEvent,
+  onWorkHoldChange: (until) => sleepGuard.setWorkHoldUntil(until),
   log: (...args) => console.log('[presence]', ...args)
 });
 
@@ -51,10 +62,6 @@ const gpuServices = createGpuServiceManager({
   stateFile: path.join(dataDir, 'gpu-services-state.json'),
   pauseFile: path.join(process.env.ProgramData || 'C:\\ProgramData', 'gpu-host-guard', 'intentional-pause.json'),
   log: (...args) => console.log('[gpu-services]', ...args)
-});
-const sleepGuard = createSleepGuard({
-  script: path.join(root, 'scripts', 'sleep-guard.ps1'),
-  log: (...args) => console.log('[sleep-guard]', ...args)
 });
 const sglangServices = createSglangServiceManager({
   scriptsDir: path.join(root, 'scripts'),
@@ -306,7 +313,8 @@ function isSameOriginRequest(req) {
 async function handlePresenceApi(req, res, url) {
   if (!isSameOriginRequest(req)) return asJson(res, { error: 'forbidden' }, 403);
   if (url.pathname === '/monitor/api/presence' && req.method === 'GET') {
-    return asJson(res, url.searchParams.has('refresh') ? await presence.refresh() : presence.getSnapshot());
+    const snapshot = url.searchParams.has('refresh') ? await presence.refresh() : presence.getSnapshot();
+    return asJson(res, { ...snapshot, sleepGuard: { active: sleepGuard.active, running: sleepGuard.running } });
   }
   if (url.pathname === '/monitor/api/gpu-services' && req.method === 'GET') {
     return asJson(res, await gpuServices.getStatus());
@@ -389,5 +397,5 @@ async function main() {
   presence.start();
   console.log(presence.getSnapshot().configured ? `NKS presence: host ${process.env.NKS_HOST_ID} -> ${process.env.NKS_URL}` : 'NKS presence: not configured (set NKS_URL / NKS_API_KEY / NKS_HOST_ID); local measurements only');
 }
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { sleepGuard.setActive(false); presence.stop(); process.exit(0); });
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { sleepGuard.stop(); presence.stop(); process.exit(0); });
 main().catch((error) => { console.error(error); process.exitCode = 1; });
