@@ -1,0 +1,21 @@
+{
+  "label": "vision-384k-q4",
+  "context": {
+    "native": 393216,
+    "max_positions": 393216
+  },
+  "vision": {
+    "enabled": true,
+    "available": true,
+    "error": null
+  },
+  "prompt_tokens": 367142,
+  "completion_tokens": 9,
+  "elapsed_s": 77.24,
+  "prompt_tps": 4799.0,
+  "decode_tps": 58.5,
+  "answer": "ORCHID-4827",
+  "needle_correct": true,
+  "free_ram_before_gib": 7.03,
+  "free_ram_after_gib": 6.13
+}

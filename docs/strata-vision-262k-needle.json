@@ -1,0 +1,21 @@
+{
+  "label": "vision-262k",
+  "context": {
+    "native": 262144,
+    "max_positions": 262144
+  },
+  "vision": {
+    "enabled": true,
+    "available": true,
+    "error": null
+  },
+  "prompt_tokens": 249679,
+  "completion_tokens": 9,
+  "elapsed_s": 48.34,
+  "prompt_tps": 5218.6,
+  "decode_tps": 147.3,
+  "answer": "ORCHID-4827",
+  "needle_correct": true,
+  "free_ram_before_gib": 4.51,
+  "free_ram_after_gib": 4.83
+}

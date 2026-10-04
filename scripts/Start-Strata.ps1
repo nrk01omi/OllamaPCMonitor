@@ -1,6 +1,7 @@
 param(
     [int]$ContextSize = 0,     # 0 = keep the installed setting; otherwise reconfigure with Strata's setup first
     [int]$Port = 8082,
+    [string]$ConfigPath = '',  # alternate saved config, e.g. the vision variant
     [switch]$Open              # open Strata's browser UI when ready
 )
 
@@ -10,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $root = 'C:\Apps\Strata'
 $dataDir = 'D:\Strata-data'
 $python = Join-Path $root '.venv\Scripts\python.exe'
-$config = Join-Path $root 'strata-iq2_xs.json'
+$config = if ($ConfigPath) { $ConfigPath } else { Join-Path $root 'strata-iq2_xs.json' }
 
 foreach ($path in @($python, $config, (Join-Path $root 'serve\server.py'))) {
     if (-not (Test-Path -LiteralPath $path)) { throw "Strata is not installed ($path missing). Run: $root\START-HERE.bat --yes --family qwen --model IQ2_XS --context 131072 --vision no --port $Port --data-dir $dataDir --no-start" }
@@ -28,9 +29,17 @@ if ($ContextSize -gt 0) {
     $args = (Get-Content -LiteralPath $config -Raw | ConvertFrom-Json).args
     $current = [int]$args[[array]::IndexOf($args, '--max-context') + 1]
     if ($current -ne $ContextSize) {
+        if ($ConfigPath) { throw "Saved config context is $current, expected $ContextSize. Rebuild the variant config before launching." }
         Write-Host "Reconfiguring context $current -> $ContextSize ..."
         & cmd /c "`"$root\START-HERE.bat`" --setup --yes --family qwen --model IQ2_XS --context $ContextSize --vision no --port $Port --data-dir $dataDir --no-start"
         if ($LASTEXITCODE -ne 0) { throw "Strata setup failed (exit $LASTEXITCODE)" }
+    }
+}
+
+if ($ConfigPath) {
+    $variant = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+    if (-not $variant.vision -or -not (Test-Path -LiteralPath $variant.vision.mmproj)) {
+        throw "Vision encoder is missing from the variant config: $config"
     }
 }
 

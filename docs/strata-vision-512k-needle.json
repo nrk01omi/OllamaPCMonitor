@@ -1,0 +1,21 @@
+{
+  "label": "vision-512k-q4",
+  "context": {
+    "native": 524288,
+    "max_positions": 524288
+  },
+  "vision": {
+    "enabled": true,
+    "available": true,
+    "error": null
+  },
+  "prompt_tokens": 513969,
+  "completion_tokens": 9,
+  "elapsed_s": 115.0,
+  "prompt_tps": 4505.8,
+  "decode_tps": 91.6,
+  "answer": "ORCHID-4827",
+  "needle_correct": true,
+  "free_ram_before_gib": 6.36,
+  "free_ram_after_gib": 5.47
+}

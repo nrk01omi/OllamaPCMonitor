@@ -169,7 +169,7 @@
     if (!starting) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(sglangServices.startedAt || Date.now())) / 1000));
     $('sglang-modal-detail').textContent = `${sglangServices.selected || '大型 LLM'} を起動中（${elapsed} 秒）。完了まで操作しないでください。`;
-    const steps = sglangServices.selected === 'strata128k' ? ['GPU 解放を確認', 'Strata プロセスを開始', '128K 設定を確認', 'モデル重みをロード', 'API の起動を確認'] : ['GPU 解放を確認', 'WSL2 / SGLang プロセスを開始', 'モデル重みをロード', 'NVFP4 カーネルを準備', 'API の起動を確認'];
+    const steps = sglangServices.selected?.startsWith('strata128k') ? ['GPU 解放を確認', 'Strata プロセスを開始', '128K 設定を確認', 'モデル重みをロード', 'API の起動を確認'] : ['GPU 解放を確認', 'WSL2 / SGLang プロセスを開始', 'モデル重みをロード', 'NVFP4 カーネルを準備', 'API の起動を確認'];
     const active = elapsed < 8 ? 1 : elapsed < 45 ? 2 : elapsed < 180 ? 3 : 4;
     $('sglang-modal-flow').replaceChildren(...steps.map((label, index) => {
       const item = document.createElement('li'); item.className = index < active ? 'done' : index === active ? 'active' : ''; item.textContent = label; return item;

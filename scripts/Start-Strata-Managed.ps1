@@ -1,7 +1,9 @@
+param([switch]$Vision)
+
 $ErrorActionPreference = 'Stop'
 $root = 'C:\Apps\Strata'
-$config = Join-Path $root 'strata-iq2_xs.json'
-$launcher = Join-Path $PSScriptRoot 'Start-Strata-128K.ps1'
+$config = Join-Path $root $(if ($Vision) { 'strata-iq2_xs-vision-128k.json' } else { 'strata-iq2_xs.json' })
+$launcher = Join-Path $PSScriptRoot $(if ($Vision) { 'Start-Strata-Vision-128K.ps1' } else { 'Start-Strata-128K.ps1' })
 $pidFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'data\strata-managed.pid'
 
 if (-not (Test-Path -LiteralPath $launcher)) { throw "Strata launcher missing: $launcher" }
@@ -21,4 +23,4 @@ if ($process.HasExited) {
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
     throw "Strata launcher exited immediately (code $($process.ExitCode))"
 }
-Write-Host "Strata 128K launch started (PID $($process.Id), API http://127.0.0.1:8082/v1)"
+Write-Host "Strata 128K $(if ($Vision) { 'Vision' } else { 'Text' }) launch started (PID $($process.Id), API http://127.0.0.1:8082/v1)"

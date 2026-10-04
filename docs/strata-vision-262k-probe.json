@@ -1,0 +1,33 @@
+{
+  "label": "vision-262k",
+  "model": "qwen3.8-flash-next-iq2_xs",
+  "context": {
+    "native": 262144,
+    "max_positions": 262144
+  },
+  "vision": {
+    "enabled": true,
+    "available": true,
+    "error": null
+  },
+  "rows": [
+    {
+      "target": 160000,
+      "run": 0,
+      "prompt_tokens": 234968,
+      "completion_tokens": 16,
+      "elapsed_s": 45.52,
+      "prompt_tps": 5242.7,
+      "decode_tps": 93.0,
+      "free_ram_before_gib": 5.4,
+      "free_ram_after_gib": 4.59
+    }
+  ],
+  "median": {
+    "160000": {
+      "prompt_tps": 5242.7,
+      "decode_tps": 93.0,
+      "elapsed_s": 45.52
+    }
+  }
+}

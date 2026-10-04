@@ -1,0 +1,93 @@
+{
+  "label": "text-128k",
+  "model": "qwen3.8-flash-next-iq2_xs",
+  "context": {
+    "native": 131072,
+    "max_positions": 131072
+  },
+  "vision": {
+    "enabled": false,
+    "available": false,
+    "error": null
+  },
+  "rows": [
+    {
+      "target": 4096,
+      "run": 0,
+      "prompt_tokens": 6055,
+      "completion_tokens": 180,
+      "elapsed_s": 2.4,
+      "prompt_tps": 4426.2,
+      "decode_tps": 177.4,
+      "free_ram_before_gib": 7.65,
+      "free_ram_after_gib": 7.19
+    },
+    {
+      "target": 4096,
+      "run": 1,
+      "prompt_tokens": 6057,
+      "completion_tokens": 180,
+      "elapsed_s": 2.04,
+      "prompt_tps": 5324.4,
+      "decode_tps": 205.3,
+      "free_ram_before_gib": 7.19,
+      "free_ram_after_gib": 7.18
+    },
+    {
+      "target": 4096,
+      "run": 2,
+      "prompt_tokens": 6056,
+      "completion_tokens": 180,
+      "elapsed_s": 2.16,
+      "prompt_tps": 5303.9,
+      "decode_tps": 183.4,
+      "free_ram_before_gib": 7.18,
+      "free_ram_after_gib": 7.18
+    },
+    {
+      "target": 16384,
+      "run": 0,
+      "prompt_tokens": 24097,
+      "completion_tokens": 180,
+      "elapsed_s": 5.16,
+      "prompt_tps": 5760.4,
+      "decode_tps": 195.4,
+      "free_ram_before_gib": 7.18,
+      "free_ram_after_gib": 7.05
+    },
+    {
+      "target": 16384,
+      "run": 1,
+      "prompt_tokens": 24101,
+      "completion_tokens": 180,
+      "elapsed_s": 5.24,
+      "prompt_tps": 5706.5,
+      "decode_tps": 186.9,
+      "free_ram_before_gib": 7.05,
+      "free_ram_after_gib": 7.03
+    },
+    {
+      "target": 16384,
+      "run": 2,
+      "prompt_tokens": 24099,
+      "completion_tokens": 180,
+      "elapsed_s": 5.18,
+      "prompt_tps": 5718.3,
+      "decode_tps": 197.9,
+      "free_ram_before_gib": 7.03,
+      "free_ram_after_gib": 7.04
+    }
+  ],
+  "median": {
+    "4096": {
+      "prompt_tps": 5303.9,
+      "decode_tps": 183.4,
+      "elapsed_s": 2.16
+    },
+    "16384": {
+      "prompt_tps": 5718.3,
+      "decode_tps": 195.4,
+      "elapsed_s": 5.18
+    }
+  }
+}
