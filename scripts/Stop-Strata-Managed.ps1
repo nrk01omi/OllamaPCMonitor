@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $pidFile = Join-Path (Split-Path $PSScriptRoot -Parent) 'data\strata-managed.pid'
 if (-not (Test-Path -LiteralPath $pidFile)) {
-    if (Get-NetTCPConnection -LocalPort 8082 -State Listen -ErrorAction SilentlyContinue) { throw 'Strata is running outside dashboard control; stop it manually' }
+    if (Get-NetTCPConnection -LocalPort 18082 -State Listen -ErrorAction SilentlyContinue) { throw 'Strata is running outside dashboard control; stop it manually' }
     return
 }
 $saved = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json
@@ -18,12 +18,12 @@ if ($parent -and $saved.startedAt -and [math]::Abs(($parent.StartTime.ToUniversa
     }
     for ($i = $descendants.Count - 1; $i -ge 0; $i--) { Stop-Process -Id $descendants[$i] -Force -ErrorAction SilentlyContinue }
     Stop-Process -Id $managedPid -Force -ErrorAction SilentlyContinue
-} elseif (Get-NetTCPConnection -LocalPort 8082 -State Listen -ErrorAction SilentlyContinue) {
+} elseif (Get-NetTCPConnection -LocalPort 18082 -State Listen -ErrorAction SilentlyContinue) {
     throw 'Strata process ownership could not be verified; stop it manually'
 }
 Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
 for ($i = 0; $i -lt 30; $i++) {
-    if (-not (Get-NetTCPConnection -LocalPort 8082 -State Listen -ErrorAction SilentlyContinue)) { return }
+    if (-not (Get-NetTCPConnection -LocalPort 18082 -State Listen -ErrorAction SilentlyContinue)) { return }
     Start-Sleep -Seconds 1
 }
-throw 'Strata port 8082 did not close after stopping the managed process'
+throw 'Strata port 18082 did not close after stopping the managed process'

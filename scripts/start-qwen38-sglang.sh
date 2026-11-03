@@ -16,6 +16,7 @@ trap 'rm -f /root/run/sglang-qwen38.pid' EXIT
 exec sglang serve \
   --model-path /root/models/Qwen3.8-27B-NVFP4 \
   --served-model-name qwen3.8-27b \
+  --context-length 65536 \
   --trust-remote-code \
   --tp-size 1 \
   --mem-fraction-static 0.90 \

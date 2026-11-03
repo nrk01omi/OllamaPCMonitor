@@ -1,4 +1,4 @@
-param([int]$Port = 8082, [switch]$Open)
+param([int]$Port = 18082, [switch]$Open)
 
 # Separate vision-enabled config; the text-only Strata config remains intact.
 $config = 'C:\Apps\Strata\strata-iq2_xs-vision-128k.json'

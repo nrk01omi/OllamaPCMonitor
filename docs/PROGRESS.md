@@ -1,5 +1,19 @@
 # OllamaPCMonitor 進捗ログ
 
+## 2026-10-08
+
+**実施・確認**
+- Strata Vision なし/あり、Qwen3.8-27B、Qwen3-Coder-30B を外部から選択可能にし、8082 を共通 API 入口にした。`/v1/models` は 11502 と 8082 で同じ4件を返す。
+- Qwen3.8-27B は暫定 65536 コンテキストで実起動し、SGLang `context_length=65536`、KV 容量 117921、セッション `ready=true`、8082 経由の短い推論を確認。検証セッションは終了済み。
+
+**後日タスク（未着手）**
+- 4 構成それぞれの指定可能なコンテキストサイズを実機計測する。候補サイズごとに起動可否、実効コンテキスト、KV 容量・入力上限、境界付近の推論成否、GPU/メモリ使用量を記録する。
+- 各構成の安定最大値を決定し、起動スクリプト、`/v1/models.context_window`、セッションの ready 判定と照合条件に反映する。Qwen3-Coder は実起動も未検証。
+
+**残件**
+- NKS 側の外部セッション用スリープ抑止と未コミット差分の整理。
+
+
 ## 2026-09-19
 
 **やり取りの流れ**
@@ -84,3 +98,30 @@
 - git log にて 2026-09-21 以降のコミット 5 件を確認（SGLang 連携すべて確定済み）
 
 **残件（変更なし）** — 上記 2026-09-21 の残件 1〜4 が継続中
+
+---
+
+## 2026-10-07
+
+**やり取りの流れ**
+- セッション開始直後に `/record-progress`（このセッションでの実装作業はなし）
+- git log にて 2026-09-27 以降のコミット 7 件を確認
+
+**前回以降のコミット（7件）**
+- `0d75537`〜`f7216bf`: タスクスケジューラ自己修復・VS Code からの管理者昇格起動・self-heal 更新時のレガシートリガー除去
+- `4949552`: Strata 128K/32K/Managed ダッシュボード制御、Tailscale ファイアウォール設定スクリプト、ベンチ結果ドキュメント追加
+- `fb84b2d`: Strata vision/text の別個起動制御、視覚評価・コンテキストプローブスクリプト追加
+
+**未コミット（現在）**
+- `server.js`・`sleep-guard.js` — 修正あり（+54/+11 行）
+- 未追跡: `model-sessions.js`、`docs/opm-strata-model-session-spec.md`、`scripts/Configure-ModelControl-TailscaleFirewall.ps1`、`scripts/Configure-Strata-LanFirewall.ps1`、`test/`、`docs/sglang_5090_qwen3.827b.md`
+
+**残件 / 次にやること**
+1. `scripts\install-task.ps1` でタスクスケジューラ登録
+2. 実機検証 §7（画面ロック・スリープ復帰・実 NAS 疎通）
+3. SGLang 連携の実機検証
+4. 未コミットを整理してコミット
+
+**未決の事項**
+- 実装差分（ポート変更・ローカル MCP 検知方式）のオーナー承認（持ち越し）
+- `model-sessions.js` / `docs/opm-strata-model-session-spec.md` の用途・コミット可否未確認

@@ -9,6 +9,7 @@ function createSleepGuard({ script, log = () => {} }) {
   let child = null;
   let wanted = false;
   let sglangActive = false;
+  let sessionActive = false;
   let workHoldUntil = 0;
   let expiryTimer = null;
 
@@ -32,7 +33,7 @@ function createSleepGuard({ script, log = () => {} }) {
   }
 
   function update() {
-    const next = sglangActive || workHoldUntil > Date.now();
+    const next = sglangActive || sessionActive || workHoldUntil > Date.now();
     if (next !== wanted) log(`sleep prevention ${next ? 'on' : 'off'} (work hold: ${workHoldUntil > Date.now()}, SGLang: ${sglangActive})`);
     wanted = next;
     if (wanted) start();
@@ -41,6 +42,11 @@ function createSleepGuard({ script, log = () => {} }) {
 
   function setActive(active) {
     sglangActive = Boolean(active);
+    update();
+  }
+
+  function setSessionActive(active) {
+    sessionActive = Boolean(active);
     update();
   }
 
@@ -57,10 +63,11 @@ function createSleepGuard({ script, log = () => {} }) {
 
   function stop() {
     sglangActive = false;
+    sessionActive = false;
     setWorkHoldUntil(null);
   }
 
-  return { setActive, setWorkHoldUntil, stop, get active() { return wanted; }, get running() { return Boolean(child); } };
+  return { setActive, setSessionActive, setWorkHoldUntil, stop, get active() { return wanted; }, get running() { return Boolean(child); } };
 }
 
 module.exports = { createSleepGuard };

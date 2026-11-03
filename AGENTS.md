@@ -2,6 +2,12 @@
 
 ## 進捗ログ
 
+### 2026-10-08
+- 外部モデル選択を 4 構成（Strata 128K の Vision なし/あり、Qwen3.8-27B、Qwen3-Coder-30B）に拡張し、外部 API を 8082 に統一。`/v1/models` は 11502/8082 で同じ一覧を返す。
+- Qwen3.8-27B は現在 65536 コンテキストに固定。実機で `context_length=65536`、KV 容量 117921、セッション `ready=true`、8082 経由の短い推論を確認し、検証セッションは終了済み。Qwen3-Coder の実起動は未検証。
+- **後日タスク**: 4 構成それぞれで指定可能なコンテキストサイズを実機で段階的に計測する。各サイズについて起動可否、SGLang/Strata の実効コンテキスト、KV 容量・入力上限、境界付近の推論成否、GPU/メモリ使用量を記録し、安定して使える最大値を決める。結果に合わせて起動スクリプト、`/v1/models` の `context_window`、セッション ready 判定を更新する。未着手。
+- 残件: NKS 側の外部セッション用スリープ抑止、Qwen3-Coder 実機検証、コンテキストサイズ計測、未コミット差分の整理。
+
 ### 2026-09-19
 - 作業指示書 `docs/ollama-pc-monitor-work-order.md` 追加（contract `pc-presence-v1` v1.1）
 - 現状: Ollama 透明プロキシ（11435→11434）＋ダッシュボード（11500）のみ動作中
@@ -26,3 +32,9 @@
 
 ### 2026-09-27
 - セッション開始直後に `/record-progress`。実装作業なし。残件は上記と同じ。
+
+### 2026-10-07
+- セッション開始直後に `/record-progress`。実装作業なし。
+- 前回（2026-09-27）以降にコミット 7 件: タスクスケジューラ自己修復・管理者昇格対応（`0d75537`〜`f7216bf`）、Strata 128K ダッシュボード制御・Tailscale API アクセス（`4949552`）、Strata vision/text 別個起動制御・評価スクリプト追加（`fb84b2d`）
+- 未コミット: `server.js`・`sleep-guard.js`（修正）、`model-sessions.js`・`docs/opm-strata-model-session-spec.md`・firewall スクリプト 2 本・`test/`（未追跡）
+- 残件: ①タスクスケジューラ登録 ②実機検証 §7 ③SGLang 実機検証 ④未コミット整理 & git commit

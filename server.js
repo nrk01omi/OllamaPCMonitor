@@ -9,6 +9,9 @@ const { getGpuStatus } = require('./gpu');
 const { createGpuServiceManager } = require('./gpu-services');
 const { createSglangServiceManager } = require('./sglang-services');
 const { createSleepGuard } = require('./sleep-guard');
+const { createModelSessions } = require('./model-sessions');
+const { createInferenceGateway } = require('./inference-gateway');
+const { createOllamaGpuCheck } = require('./ollama-gpu-check');
 
 const root = __dirname;
 
@@ -26,10 +29,13 @@ const powerEventFile = path.join(dataDir, 'power-events.jsonl');
 const idleEventFile = path.join(dataDir, 'idle-events.jsonl');
 const publicDir = path.join(root, 'public');
 const upstream = new URL(process.env.OLLAMA_URL || 'http://127.0.0.1:11434');
+const checkOllamaGpu = createOllamaGpuCheck([upstream.href, process.env.LOCAL_OLLAMA_URL || 'http://127.0.0.1:11500']);
 // 11500 is taken by the dedicated Ollama that the local MCP server (ollama-mcp) starts, so the dashboard uses 11501.
 const monitorPort = Number(process.env.MONITOR_PORT || 11501);
 const proxyPort = Number(process.env.PROXY_PORT || 11435);
 const proxyHost = process.env.PROXY_HOST || '0.0.0.0';
+const controlHost = process.env.CONTROL_HOST || '0.0.0.0';
+const controlPort = Number(process.env.CONTROL_PORT || 11502);
 const logDir = process.env.OLLAMA_LOG_DIR || 'C:\\ollama\\logs';
 // Source address of the proxy's own upstream calls. The main Ollama log then shows 127.0.0.2 for forwarded
 // requests (possibly from the NAS), which presence.js does not treat as local use.
@@ -66,9 +72,18 @@ const gpuServices = createGpuServiceManager({
 const sglangServices = createSglangServiceManager({
   scriptsDir: path.join(root, 'scripts'),
   stateFile: path.join(dataDir, 'sglang-services-state.json'),
+  checkOllamaGpu,
   log: (...args) => console.log('[sglang-services]', ...args),
   onActivityChange: (active) => sleepGuard.setActive(active)
 });
+const modelSessions = createModelSessions({
+  stateFile: path.join(dataDir, 'model-sessions-state.json'), scriptsDir: path.join(root, 'scripts'),
+  checkOllamaGpu,
+  gpuServices, sglangServices, presence, sleepGuard,
+  policyReady: () => true,
+  log: (...args) => console.log('[model-sessions]', ...args)
+});
+const inferenceGateway = createInferenceGateway({ modelSessions, sglangServices, controlPort });
 
 let events = [];
 let powerEvents = [];
@@ -329,6 +344,7 @@ async function handlePresenceApi(req, res, url) {
   }
   if (url.pathname === '/monitor/api/sglang-services' && req.method === 'GET') return asJson(res, await sglangStatus());
   if (url.pathname === '/monitor/api/sglang-services' && req.method === 'POST') {
+    if (modelSessions.hasActive()) return asJson(res, { error: 'OPM model session is active' }, 409);
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'invalid JSON' }, 400); }
     try {
@@ -338,9 +354,10 @@ async function handlePresenceApi(req, res, url) {
         await sglangServices.select(input.model);
       } else await sglangServices.stopAll();
       return asJson(res, await sglangStatus());
-    } catch (error) { return asJson(res, { error: error.message }, error.code === 'BAD_REQUEST' ? 400 : error.code === 'NO_WORK_HOLD' || error.code === 'STARTING' ? 409 : 502); }
+    } catch (error) { return asJson(res, { code: error.code || 'control_failed', error: error.message }, error.status || (error.code === 'BAD_REQUEST' ? 400 : error.code === 'NO_WORK_HOLD' || error.code === 'STARTING' ? 409 : 502)); }
   }
   if (url.pathname === '/monitor/api/work-hold' && req.method === 'POST') {
+    if (modelSessions.hasActive()) return asJson(res, { error: 'OPM model session is active' }, 409);
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'JSON が不正です' }, 400); }
     try {
@@ -386,12 +403,59 @@ const monitor = http.createServer(async (req, res) => {
   catch { res.writeHead(404).end('Not found'); }
 });
 
+const control = http.createServer(async (req, res) => {
+  function controlBody() {
+    return new Promise((resolve, reject) => {
+      let bytes = 0;
+      const chunks = [];
+      req.on('data', (chunk) => {
+        bytes += chunk.length;
+        if (bytes > 8192) reject(Object.assign(new Error('Control request too large'), { status: 413, code: 'bad_request' }));
+        else chunks.push(chunk);
+      });
+      req.on('end', () => {
+        if (bytes > 8192) return;
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        catch (error) { reject(error); }
+      });
+      req.on('error', reject);
+    });
+  }
+  try {
+    const pathname = new URL(req.url, 'http://control.local').pathname;
+    const match = /^\/control\/v1\/model-sessions\/([^/]+)$/.exec(pathname);
+    if (pathname === '/v1/models' && req.method === 'GET')
+      return asJson(res, modelSessions.models());
+    if (pathname === '/control/v1/model-sessions/availability' && req.method === 'GET')
+      return asJson(res, await modelSessions.availability());
+    if (pathname === '/control/v1/model-sessions' && req.method === 'POST') {
+      const input = await controlBody();
+      return asJson(res, await modelSessions.create(input), 202);
+    }
+    if (match && req.method === 'GET') return asJson(res, modelSessions.get(match[1]));
+    if (match && req.method === 'PUT') {
+      const input = await controlBody();
+      return asJson(res, await modelSessions.extend(match[1], input.ttl_seconds));
+    }
+    if (match && req.method === 'DELETE') return asJson(res, await modelSessions.release(match[1]));
+    return asJson(res, { code: 'not_found', message: 'Unknown control endpoint' }, 404);
+  } catch (error) {
+    const status = error instanceof SyntaxError ? 400 : error.status || 500;
+    return asJson(res, { code: error instanceof SyntaxError ? 'bad_request' : error.code || 'control_failed', message: error.message,
+      ...(status === 409 || status === 503 ? { retry_after_s: 30 } : {}) }, status);
+  }
+});
+
 async function main() {
   await fsp.mkdir(dataDir, { recursive: true });
   await loadSavedEvents();
   await loadSavedPowerEvents();
   await loadSavedIdleEvents();
   monitor.listen(monitorPort, '127.0.0.1', () => console.log(`Monitor: http://127.0.0.1:${monitorPort}`));
+  if (process.env.CONTROL_ENABLED === '1') control.listen(controlPort, controlHost,
+    () => console.log(`Model control: http://${controlHost}:${controlPort}`));
+  if (process.env.CONTROL_ENABLED === '1') inferenceGateway.listen(8082, controlHost,
+    () => console.log(`Model inference gateway: http://${controlHost}:8082`));
   http.createServer(proxyRequest).listen(proxyPort, proxyHost, () => console.log(`Ollama capture proxy: http://${proxyHost}:${proxyPort} -> ${upstream.href}`));
   importOllamaLogs().then(() => console.log(`Imported ${imported} historic access-log events from ${logDir}`));
   presence.start();

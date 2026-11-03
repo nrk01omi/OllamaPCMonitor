@@ -6,8 +6,9 @@ const { execFile } = require('node:child_process');
 const MODELS = {
   qwen38: { label: 'Qwen3.8-27B', port: 30000, start: 'Start-Qwen38-SGLang.ps1', stop: 'Stop-Qwen38-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen38.pid' },
   qwen3coder: { label: 'Qwen3-Coder-30B', port: 30001, start: 'Start-Qwen3Coder-SGLang.ps1', stop: 'Stop-Qwen3Coder-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen3coder.pid' },
-  strata128k: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision なし)', port: 8082, vision: false, start: 'Start-Strata-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') },
-  strata128kvision: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision あり)', port: 8082, vision: true, start: 'Start-Strata-Vision-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') }
+  onejev9b: { label: 'OneJev 9B (判定専用)', port: 8083, api: 'systemone', inferenceModel: 'onejev1.6-9b', start: 'Start-OneJev-Flide.ps1', stop: 'Stop-OneJev-Flide.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\flide-onejev.pid' },
+  strata128k: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision なし)', port: 18082, vision: false, start: 'Start-Strata-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') },
+  strata128kvision: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision あり)', port: 18082, vision: true, start: 'Start-Strata-Vision-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') }
 };
 
 function runScript(script) {
@@ -17,7 +18,7 @@ function runScript(script) {
   }));
 }
 
-function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onActivityChange = () => {} }) {
+function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = async () => {}, log = () => {}, onActivityChange = () => {} }) {
   let state = { holdUntil: null, operation: 'idle', selected: null, startedAt: null, lastError: null };
   let timer = null;
   let serial = Promise.resolve();
@@ -34,9 +35,16 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onA
   };
   const health = async (model) => {
     try {
-      const response = await fetch(`http://127.0.0.1:${model.port}/${model.port === 8082 ? 'v1/status' : 'health'}`, { signal: AbortSignal.timeout(1200) });
+      if (model.api === 'systemone') {
+        // Running means OneJev can actually answer a judgement, not just that the port is open.
+        const reply = await fetch(`http://127.0.0.1:${model.port}/v1/systemone`, { method: 'POST', headers: { 'content-type': 'application/json' }, signal: AbortSignal.timeout(3000),
+          body: JSON.stringify({ model: model.inferenceModel, state: { question: '冷蔵庫の在庫を調べたい' }, questions: { best: { type: 'choice', instructions: '質問の答えに最も近い項目を選ぶ。', criteria: { 0: '冷蔵庫 — 食品の在庫管理', 1: 'ゴルフ — スコアの記録' } } } }) });
+        const probabilities = reply.ok ? (await reply.json()).answers?.best?.probabilities : null;
+        return [probabilities?.[0], probabilities?.[1]].every((value) => typeof value === 'number' && value >= 0 && value <= 1);
+      }
+      const response = await fetch(`http://127.0.0.1:${model.port}/${model.vision !== undefined ? 'v1/status' : 'health'}`, { signal: AbortSignal.timeout(1200) });
       if (!response.ok) return false;
-      if (model.port !== 8082) return true;
+      if (model.vision === undefined) return true;
       const status = await response.json();
       return status.loaded === true && status.context?.max_positions === 131072 &&
         status.vision?.enabled === model.vision && (!model.vision || status.vision?.available === true);
@@ -44,7 +52,7 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onA
   };
   const run = (fn) => { serial = serial.then(fn, fn); return serial; };
   async function status() {
-    const models = await Promise.all(Object.entries(MODELS).map(async ([id, model]) => ({ id, label: model.label, port: model.port, running: await health(model) })));
+    const models = await Promise.all(Object.entries(MODELS).map(async ([id, model]) => ({ id, label: model.label, port: 8082, running: await health(model) })));
     const selected = models.find((model) => model.id === state.selected);
     if (state.operation === 'starting' && selected?.running) {
       state.operation = 'running'; state.lastError = null; save();
@@ -83,11 +91,12 @@ function createSglangServiceManager({ scriptsDir, stateFile, log = () => {}, onA
       }
       const current = await status();
       if (state.operation === 'running' && state.selected === id && current.models.find((model) => model.id === id)?.running) return current;
+      await checkOllamaGpu();
       await Promise.all([...new Set(Object.entries(MODELS).filter(([other]) => other !== id).map(([, model]) => model.stop))].map((script) => runScript(require('node:path').join(scriptsDir, script))));
       state.operation = 'starting'; state.selected = id; state.startedAt = new Date().toISOString(); state.lastError = null; save();
       await reportActivity(true);
       try {
-        if (MODELS[id].port !== 8082) await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
+        if (MODELS[id].vision === undefined) await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
         await runScript(require('node:path').join(scriptsDir, MODELS[id].start));
       }
       catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); await reportActivity(false); throw error; }

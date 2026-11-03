@@ -14,7 +14,7 @@ if (Test-Path -LiteralPath $pidFile) {
     if (Get-Process -Id $oldPid -ErrorAction SilentlyContinue) { throw "Managed Strata process $oldPid is already running" }
     Remove-Item -LiteralPath $pidFile
 }
-if (Get-NetTCPConnection -LocalPort 8082 -State Listen -ErrorAction SilentlyContinue) { throw 'Port 8082 is already in use' }
+if (Get-NetTCPConnection -LocalPort 18082 -State Listen -ErrorAction SilentlyContinue) { throw 'Port 18082 is already in use' }
 
 $process = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"' + $launcher + '"')) -WindowStyle Hidden -PassThru
 @{ pid = $process.Id; startedAt = $process.StartTime.ToUniversalTime().ToString('o') } | ConvertTo-Json -Compress | Set-Content -LiteralPath $pidFile -NoNewline
@@ -23,4 +23,4 @@ if ($process.HasExited) {
     Remove-Item -LiteralPath $pidFile -ErrorAction SilentlyContinue
     throw "Strata launcher exited immediately (code $($process.ExitCode))"
 }
-Write-Host "Strata 128K $(if ($Vision) { 'Vision' } else { 'Text' }) launch started (PID $($process.Id), API http://127.0.0.1:8082/v1)"
+Write-Host "Strata 128K $(if ($Vision) { 'Vision' } else { 'Text' }) launch started (PID $($process.Id), API http://127.0.0.1:18082/v1)"

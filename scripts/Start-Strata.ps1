@@ -1,6 +1,6 @@
 param(
     [int]$ContextSize = 0,     # 0 = keep the installed setting; otherwise reconfigure with Strata's setup first
-    [int]$Port = 8082,
+    [int]$Port = 18082,
     [string]$ConfigPath = '',  # alternate saved config, e.g. the vision variant
     [switch]$Open              # open Strata's browser UI when ready
 )
@@ -45,7 +45,7 @@ if ($ConfigPath) {
 
 # Foreground: Ctrl+C stops the model. The first start can make the PC sluggish for 1-3 minutes while ~55 GB is loaded.
 # Windows Firewall permits inbound TCP 8082 only through the Tailscale interface.
-$serverArgs = @('serve\server.py', '--engine', 'strata', '--config', $config, '--host', '0.0.0.0', '--port', $Port)
+$serverArgs = @('serve\server.py', '--engine', 'strata', '--config', $config, '--host', '127.0.0.1', '--port', $Port)
 if ($Open) { $serverArgs += '--open' }
 Write-Host "Strata API: http://<Tailscale-IP>:$Port/v1  (health: /health)"
 Push-Location $root
