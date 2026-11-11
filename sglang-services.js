@@ -72,8 +72,24 @@ function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = as
   }
   async function stopAll({ clearHold = false } = {}) {
     return run(async () => {
+      const previous = { operation: state.operation, selected: state.selected };
+      const current = await status();
       state.operation = 'stopping'; save();
-      await Promise.all([...new Set(Object.values(MODELS).map((model) => model.stop))].map((script) => runScript(require('node:path').join(scriptsDir, script))));
+      const runningIds = new Set(current.models.filter((model) => model.running).map((model) => model.id));
+      // A start may still be warming up and not answer health checks yet. Keep
+      // stopping that explicitly selected service, and retry stale "stopping"
+      // state only when its managed process/port is still present.
+      if (previous.selected && ['starting', 'running'].includes(previous.operation)) runningIds.add(previous.selected);
+      if (previous.operation === 'stopping' && previous.selected) {
+        const model = MODELS[previous.selected];
+        const pidFileExists = Boolean(model?.pidFile && fs.existsSync(model.pidFile));
+        if (pidFileExists || current.models.some((item) => item.id === previous.selected && item.running))
+          runningIds.add(previous.selected);
+      }
+      const stopScripts = [...new Set(Object.entries(MODELS)
+        .filter(([id]) => runningIds.has(id))
+        .map(([, model]) => model.stop))];
+      await Promise.all(stopScripts.map((script) => runScript(require('node:path').join(scriptsDir, script))));
       if (clearHold) state.holdUntil = null;
       state.operation = 'idle'; state.selected = null; state.startedAt = null; state.lastError = null; save();
       if (timer) { clearTimeout(timer); timer = null; }
