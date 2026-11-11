@@ -12,6 +12,7 @@ const { createSleepGuard } = require('./sleep-guard');
 const { createModelSessions } = require('./model-sessions');
 const { createInferenceGateway } = require('./inference-gateway');
 const { createOllamaGpuCheck } = require('./ollama-gpu-check');
+const { spawn } = require('node:child_process');
 
 const root = __dirname;
 
@@ -73,14 +74,23 @@ const sglangServices = createSglangServiceManager({
   scriptsDir: path.join(root, 'scripts'),
   stateFile: path.join(dataDir, 'sglang-services-state.json'),
   checkOllamaGpu,
+  getStrataQuant: () => modelSessions ? modelSessions.quantSettings() : { selected: 'IQ2_XS', prepared: false },
   log: (...args) => console.log('[sglang-services]', ...args),
   onActivityChange: (active) => sleepGuard.setActive(active)
 });
-const modelSessions = createModelSessions({
+let modelSessions;
+modelSessions = createModelSessions({
   stateFile: path.join(dataDir, 'model-sessions-state.json'), scriptsDir: path.join(root, 'scripts'),
   checkOllamaGpu,
   gpuServices, sglangServices, presence, sleepGuard,
   policyReady: () => true,
+  startQuantSetupRunner: (onLine) => new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'scripts', 'Prepare-Strata-IQ3XXS.ps1')], { windowsHide: true });
+    child.stdout.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.stderr.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`IQ3_XXS setup exited with code ${code}`)));
+  }),
   log: (...args) => console.log('[model-sessions]', ...args)
 });
 const inferenceGateway = createInferenceGateway({ modelSessions, sglangServices, controlPort });
@@ -334,6 +344,18 @@ async function handlePresenceApi(req, res, url) {
   if (url.pathname === '/monitor/api/gpu-services' && req.method === 'GET') {
     return asJson(res, await gpuServices.getStatus());
   }
+  if (url.pathname === '/monitor/api/strata-quant' && req.method === 'GET') return asJson(res, modelSessions.quantSettings());
+  if (url.pathname === '/monitor/api/strata-quant' && req.method === 'POST') {
+    let input;
+    try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'Invalid JSON' }, 400); }
+    try { return asJson(res, modelSessions.setStrataQuant(input.quant)); }
+    catch (error) { return asJson(res, { error: error.message, code: error.code }, error.status || 500); }
+  }
+  if (url.pathname === '/monitor/api/strata-quant/setup' && req.method === 'POST') {
+    if (modelSessions.hasActive()) return asJson(res, { error: 'Release the active model session before setup' }, 409);
+    try { return asJson(res, await modelSessions.startQuantSetup(), 202); }
+    catch (error) { return asJson(res, { error: error.message, code: error.code }, error.status || 500); }
+  }
   async function sglangStatus() {
     const [sglang, gpu] = await Promise.all([sglangServices.status(), gpuServices.getStatus()]);
     // A SGLang start is permitted only after every managed auxiliary service has
@@ -388,7 +410,7 @@ async function handlePresenceApi(req, res, url) {
 
 const monitor = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services' || url.pathname === '/monitor/api/sglang-services') {
+  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services' || url.pathname === '/monitor/api/sglang-services' || url.pathname.startsWith('/monitor/api/strata-quant')) {
     return handlePresenceApi(req, res, url).catch((error) => asJson(res, { error: error.message }, 500));
   }
   if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24, url.searchParams.get('include_non_work') === '1'));

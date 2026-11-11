@@ -38,7 +38,7 @@ if ($ContextSize -gt 0) {
 
 if ($ConfigPath) {
     $variant = Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
-    if (-not $variant.vision -or -not (Test-Path -LiteralPath $variant.vision.mmproj)) {
+    if ($variant.vision -and -not (Test-Path -LiteralPath $variant.vision.mmproj)) {
         throw "Vision encoder is missing from the variant config: $config"
     }
 }

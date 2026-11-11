@@ -11,14 +11,14 @@ const MODELS = {
   strata128kvision: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision あり)', port: 18082, vision: true, start: 'Start-Strata-Vision-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') }
 };
 
-function runScript(script) {
-  return new Promise((resolve, reject) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], { windowsHide: true, timeout: 30000 }, (error, stdout, stderr) => {
+function runScript(script, args = []) {
+  return new Promise((resolve, reject) => execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, ...args], { windowsHide: true, timeout: 30000 }, (error, stdout, stderr) => {
     if (error) return reject(new Error(String(stderr || stdout || error.message).trim()));
     resolve(String(stdout));
   }));
 }
 
-function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = async () => {}, log = () => {}, onActivityChange = () => {} }) {
+function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = async () => {}, getStrataQuant = () => ({ selected: 'IQ2_XS', prepared: false }), log = () => {}, onActivityChange = () => {} }) {
   let state = { holdUntil: null, operation: 'idle', selected: null, startedAt: null, lastError: null };
   let timer = null;
   let serial = Promise.resolve();
@@ -92,12 +92,26 @@ function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = as
       const current = await status();
       if (state.operation === 'running' && state.selected === id && current.models.find((model) => model.id === id)?.running) return current;
       await checkOllamaGpu();
-      await Promise.all([...new Set(Object.entries(MODELS).filter(([other]) => other !== id).map(([, model]) => model.stop))].map((script) => runScript(require('node:path').join(scriptsDir, script))));
+      // Only call stop scripts for services confirmed running. Calling every
+      // WSL stop script can fail when its distro is unavailable, even though
+      // that service is already stopped, and would prevent Strata from starting.
+      const runningIds = new Set(current.models.filter((model) => model.running).map((model) => model.id));
+      const stopScripts = [...new Set(Object.entries(MODELS)
+        .filter(([other, model]) => other !== id && runningIds.has(other))
+        .map(([, model]) => model.stop))];
+      await Promise.all(stopScripts.map((script) => runScript(require('node:path').join(scriptsDir, script))));
       state.operation = 'starting'; state.selected = id; state.startedAt = new Date().toISOString(); state.lastError = null; save();
       await reportActivity(true);
       try {
         if (MODELS[id].vision === undefined) await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
-        await runScript(require('node:path').join(scriptsDir, MODELS[id].start));
+        const scriptArgs = [];
+        if (MODELS[id].vision !== undefined) {
+          const quant = getStrataQuant();
+          if (!['IQ2_XS', 'IQ3_XXS'].includes(quant.selected)) throw new Error(`Unsupported Strata quantization: ${quant.selected}`);
+          if (quant.selected === 'IQ3_XXS' && !quant.prepared) throw new Error('IQ3_XXS is selected but not prepared');
+          scriptArgs.push('-Quant', quant.selected);
+        }
+        await runScript(require('node:path').join(scriptsDir, MODELS[id].start), scriptArgs);
       }
       catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); await reportActivity(false); throw error; }
       return status();

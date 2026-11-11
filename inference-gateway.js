@@ -39,7 +39,9 @@ function createInferenceGateway({ modelSessions, sglangServices, controlPort = 1
         selected = state.models.find((item) => item.id === state.selected && item.running)?.id ||
           (state.models.filter((item) => item.running).length === 1 ? state.models.find((item) => item.running).id : null);
       }
-      const backend = backends[selected];
+      const backend = backends[selected] && selected.startsWith('strata')
+        ? { ...backends[selected], model: modelSessions.activeInferenceModel() || backends[selected].model }
+        : backends[selected];
       if (!backend) return json(res, 503, { error: { code: 'model_not_ready', message: 'No model is ready on port 8082' } });
       if (url.pathname === '/health') return json(res, 200, { status: 'ok', model: selected });
 

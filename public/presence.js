@@ -54,6 +54,8 @@
   let live = null;
   let gpuServices = null;
   let sglangServices = null;
+  let strataQuant = null;
+  let strataQuantDirty = false;
   let unreachable = false;
   let busy = false;
 
@@ -151,6 +153,56 @@
     panel.className = 'agent-services-card';
     panel.innerHTML = '<div class="agent-services-title"><span>大型 LLM モデル起動</span><small id="sglang-note">確認中</small></div><div id="sglang-list" class="agent-services-list"></div>';
     $('agent-services-list').closest('section').after(panel);
+  }
+
+  function createStrataQuantPanel() {
+    const panel = document.createElement('section');
+    panel.className = 'agent-services-card';
+    panel.innerHTML = '<div class="agent-services-title"><span>Strata Qwen3.8 量子化</span><small id="strata-quant-note">状態を確認中</small></div><div class="quant-controls"><label>起動時の量子化 <select id="strata-quant-select"><option value="IQ2_XS">IQ2_XS（現行）</option><option value="IQ3_XXS">IQ3_XXS（3-bit級）</option></select></label><button type="button" id="strata-quant-save">設定を保存</button><button type="button" id="strata-quant-setup">IQ3_XXSを準備</button></div><small id="strata-quant-output"></small>';
+    $('sglang-list').closest('section').after(panel);
+    $('strata-quant-save').addEventListener('click', saveStrataQuant);
+    $('strata-quant-setup').addEventListener('click', prepareStrataIQ3);
+    $('strata-quant-select').addEventListener('change', () => { strataQuantDirty = true; });
+  }
+
+  async function refreshStrataQuant() {
+    try {
+      const response = await fetch('/monitor/api/strata-quant', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      strataQuant = await response.json();
+      if (!$('strata-quant-select')) createStrataQuantPanel();
+      if (!strataQuantDirty && document.activeElement !== $('strata-quant-select'))
+        $('strata-quant-select').value = strataQuant.selected;
+      const setup = strataQuant.setup || {};
+      $('strata-quant-note').textContent = setup.state === 'running' ? 'IQ3_XXSを準備中（約76GB）' : setup.state === 'failed' ? `準備失敗: ${setup.error}` : setup.state === 'complete' || strataQuant.prepared ? 'IQ3_XXS準備完了' : 'IQ3_XXS未準備';
+      $('strata-quant-setup').disabled = setup.state === 'running' || strataQuant.prepared;
+      $('strata-quant-output').textContent = setup.output ? setup.output.split('\n').filter(Boolean).slice(-2).join(' / ') : '外部APIのモデルIDは従来どおり。量子化は次回のセッション起動から反映されます。';
+    } catch { /* monitor may be restarting */ }
+  }
+
+  async function saveStrataQuant() {
+    const quant = $('strata-quant-select').value;
+    try {
+      const response = await fetch('/monitor/api/strata-quant', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quant }) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      strataQuant = data;
+      strataQuantDirty = false;
+      $('strata-quant-select').value = data.selected;
+      $('pr-message').className = 'pr-message'; $('pr-message').textContent = `${quant} を次回のStrata起動に設定しました`;
+      await refreshStrataQuant();
+    } catch (error) { $('pr-message').className = 'pr-message err'; $('pr-message').textContent = error.message; }
+  }
+
+  async function prepareStrataIQ3() {
+    $('strata-quant-setup').disabled = true;
+    try {
+      const response = await fetch('/monitor/api/strata-quant/setup', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      $('pr-message').className = 'pr-message'; $('pr-message').textContent = 'IQ3_XXSの準備を開始しました';
+      await refreshStrataQuant();
+    } catch (error) { $('strata-quant-setup').disabled = false; $('pr-message').className = 'pr-message err'; $('pr-message').textContent = error.message; }
   }
 
   function createSglangStartModal() {
@@ -294,6 +346,7 @@
     renderGpu();
     renderGpuServices();
     renderSglangServices();
+    await refreshStrataQuant();
     renderSglangStartModal();
   }
 

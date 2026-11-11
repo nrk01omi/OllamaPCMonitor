@@ -1,6 +1,7 @@
 node_modules/
 data/*.jsonl
 data/*.json
+data/strata-iq3xxs-setup.pid
 *.log
 __pycache__/
 .env

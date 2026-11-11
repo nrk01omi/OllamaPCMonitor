@@ -8,6 +8,9 @@ const net = require('node:net');
 const { getGpuStatus } = require('./gpu');
 
 const MODEL = 'qwen3.8-flash-next-iq2_xs';
+const MODEL_IQ3 = 'qwen3.8-flash-next-iq3_xxs';
+const QUANT_STATE_FILE = path.join(__dirname, 'data', 'strata-quant.json');
+const QUANT_SETUP_PID_FILE = path.join(__dirname, 'data', 'strata-iq3xxs-setup.pid');
 const VARIANTS = {
   strata128k: { name: 'Qwen3.8-Flash-Next / Strata 128K (Vision なし)', startScript: 'Start-Strata-Managed.ps1', stopScript: 'Stop-Strata-Managed.ps1', port: 18082, inferenceModel: MODEL, contextWindow: 131072, vision: false },
   strata128kvision: { name: 'Qwen3.8-Flash-Next / Strata 128K (Vision あり)', startScript: 'Start-Strata-Vision-Managed.ps1', stopScript: 'Stop-Strata-Managed.ps1', port: 18082, inferenceModel: MODEL, contextWindow: 131072, vision: true },
@@ -24,19 +27,77 @@ const pausesAux = (variant) => variant.pauseAux !== false;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const fault = (status, code, message) => Object.assign(new Error(message), { status, code });
 
-function script(file) {
+function script(file, quant) {
   return new Promise((resolve, reject) => execFile('powershell.exe',
-    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file],
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file, ...(quant ? ['-Quant', quant] : [])],
     { windowsHide: true, timeout: 45000 }, (error, stdout, stderr) =>
       error ? reject(new Error(String(stderr || stdout || error.message).trim())) : resolve()));
 }
 
 function createModelSessions({ stateFile, scriptsDir, gpuServices, sglangServices, presence, sleepGuard, policyReady,
   readStrataStatus, readSglangStatus, isStrataPortOpen, runScript = script, readGpuStatus = getGpuStatus,
-  checkOllamaGpu = async () => {}, log = () => {} }) {
+  checkOllamaGpu = async () => {}, log = () => {}, startQuantSetupRunner = async () => {} }) {
   let current = null;
   let timer = null;
   let serial = Promise.resolve();
+  let strataQuant = 'IQ2_XS';
+  let quantSetup = { state: 'idle', output: '', error: null, started_at: null };
+  try {
+    const saved = JSON.parse(fs.readFileSync(QUANT_STATE_FILE, 'utf8'));
+    if (['IQ2_XS', 'IQ3_XXS'].includes(saved.quant)) strataQuant = saved.quant;
+  } catch { /* default quant */ }
+  function setStrataQuant(value) {
+    if (!['IQ2_XS', 'IQ3_XXS'].includes(value)) throw fault(400, 'bad_request', 'Unsupported Strata quantization');
+    if (current && current.state !== 'idle') throw fault(409, 'session_conflict', 'Release the active model session before changing Strata quantization');
+    if (value === 'IQ3_XXS' && !quantSettings().prepared) throw fault(409, 'quant_not_prepared', 'IQ3_XXS setup has not completed');
+    strataQuant = value;
+    fs.mkdirSync(path.dirname(QUANT_STATE_FILE), { recursive: true });
+    fs.writeFileSync(QUANT_STATE_FILE, JSON.stringify({ quant: value, updated_at: new Date().toISOString() }, null, 2));
+    return quantSettings();
+  }
+  function quantSettings() {
+    const modelsDir = path.join('D:\\Strata-data', 'models', 'IQ3_XXS');
+    const firstPart = path.join(modelsDir, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf.part');
+    const firstShard = path.join(modelsDir, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00001-of-00002.gguf');
+    const secondPart = path.join(modelsDir, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf.part');
+    const secondShard = path.join(modelsDir, 'Qwen3.8-Flash-Next-GSQ-RCO-IQ3_XXS-00002-of-00002.gguf');
+    const prepared = fs.existsSync(path.join('D:\\Strata-data', 'packs', 'iq3_xxs', 'tokenizer')) &&
+      fs.existsSync(firstShard) && fs.existsSync(secondShard) &&
+      fs.existsSync(path.join('C:\\Apps\\Strata', 'strata-iq3_xxs.json')) &&
+      fs.existsSync(path.join('C:\\Apps\\Strata', 'strata-iq3_xxs-vision-128k.json'));
+    let setup = quantSetup;
+    if (setup.state === 'idle') {
+      try {
+        const pid = Number(fs.readFileSync(QUANT_SETUP_PID_FILE, 'utf8'));
+        process.kill(pid, 0);
+        setup = { ...setup, state: 'running', output: 'IQ3_XXS model and Strata pack setup is running' };
+      } catch { /* no active external setup */ }
+    }
+    if (setup.state === 'idle' && (fs.existsSync(firstPart) || fs.existsSync(secondPart))) {
+      const shard = fs.existsSync(firstPart) ? firstPart : secondPart;
+      const size = fs.statSync(shard).size;
+      const target = shard === firstPart ? 47.04 : 28.76;
+      setup = { ...setup, state: 'running', output: `Downloading shard ${shard === firstPart ? 1 : 2}: ${(size / 1e9).toFixed(2)} / ${target} GB` };
+    }
+    return { selected: strataQuant, prepared, setup,
+      choices: ['IQ2_XS', 'IQ3_XXS'] };
+  }
+  async function startQuantSetup() {
+    if (quantSetup.state === 'running') throw fault(409, 'setup_running', 'IQ3_XXS setup is already running');
+    if (current && current.state !== 'idle') throw fault(409, 'session_conflict', 'Release the active model session before setup');
+    const services = await sglangServices.status();
+    if (services.operation !== 'idle' || services.models.some((model) => model.running))
+      throw fault(409, 'gpu_busy', 'Stop the other managed model before setup');
+    if (await portOpen()) throw fault(409, 'gpu_busy', 'Stop the running Strata backend before setup');
+    await checkOllamaGpu();
+    quantSetup = { state: 'running', output: '', error: null, started_at: new Date().toISOString() };
+    void (async () => {
+      try { await startQuantSetupRunner((line) => { quantSetup.output = (quantSetup.output + line + '\n').slice(-12000); });
+        quantSetup = { ...quantSetup, state: 'complete' };
+      } catch (error) { quantSetup = { ...quantSetup, state: 'failed', error: error.message }; }
+    })();
+    return quantSettings();
+  }
   try { current = JSON.parse(fs.readFileSync(stateFile, 'utf8')); } catch { /* first start */ }
   function save() {
     fs.mkdirSync(path.dirname(stateFile), { recursive: true });
@@ -115,7 +176,7 @@ function createModelSessions({ stateFile, scriptsDir, gpuServices, sglangService
       id, object: 'model', owned_by: 'ollama-pc-monitor',
       name: variant.name, vision: variant.vision,
       context_window: variant.contextWindow,
-      inference_model: variant.inferenceModel,
+      inference_model: id.startsWith('strata') ? (strataQuant === 'IQ3_XXS' ? MODEL_IQ3 : MODEL) : variant.inferenceModel,
       api: apiOf(variant), inference_port: inferencePortOf(variant),
       session_state: current?.model === id ? current.state : 'idle',
       ready: current?.model === id && current.state === 'ready'
@@ -205,17 +266,24 @@ function createModelSessions({ stateFile, scriptsDir, gpuServices, sglangService
             throw fault(409, 'gpu_busy', `GPU memory is not sufficiently free for ${variant.name}`);
           await checkOllamaGpu();
           if (!input.model.startsWith('strata')) await runScript(path.join(scriptsDir, 'sync-sglang-portproxy.ps1'));
-          await runScript(path.join(scriptsDir, variant.startScript));
+          const quantForSession = input.model.startsWith('strata') ? strataQuant : null;
+          if (input.model.startsWith('strata') && quantForSession === 'IQ3_XXS' && !quantSettings().prepared)
+            throw fault(409, 'quant_not_prepared', 'IQ3_XXS is not prepared. Use the dashboard setup button first.');
+          if (input.model.startsWith('strata')) {
+            await runScript(path.join(scriptsDir, variant.startScript), quantForSession);
+          } else await runScript(path.join(scriptsDir, variant.startScript));
           for (let i = 0; i < (variant.startupTries || (input.model.startsWith('strata') ? 90 : 300)); i++) {
             const status = input.model.startsWith('strata') ? await effectiveStatus()
               : variant.api === 'systemone' ? await (readSglangStatus || systemoneStatus)(variant)
                 : await (readSglangStatus || sglangStatus)(variant);
-            if (input.model.startsWith('strata') && status)
-              status.ready = status.loaded === true && status.model === MODEL && status.context?.max_positions === 131072 &&
+            if (input.model.startsWith('strata') && status) {
+              const expectedModel = quantForSession === 'IQ3_XXS' ? MODEL_IQ3 : MODEL;
+              status.ready = status.loaded === true && status.model === expectedModel && status.context?.max_positions === 131072 &&
                 status.vision?.enabled === variant.vision && (!variant.vision || status.vision?.available === true);
+            }
             if (status?.ready) {
               if (Date.now() >= Date.parse(current.expires_at)) throw fault(500, 'ready_timeout', 'Session expired during startup');
-              current.state = 'ready'; current.effective_model = variant.inferenceModel;
+              current.state = 'ready'; current.effective_model = input.model.startsWith('strata') ? (quantForSession === 'IQ3_XXS' ? MODEL_IQ3 : MODEL) : variant.inferenceModel;
               current.context = status.context || null; current.vision = status.vision || { enabled: false, available: false }; save(); return;
             }
             await sleep(2000);
@@ -251,8 +319,9 @@ function createModelSessions({ stateFile, scriptsDir, gpuServices, sglangService
     // by stopping the managed process; the NAS can create a fresh session.
     release(current.session_id).catch((error) => log('restart cleanup:', error.message));
   }
-  return { availability, create, get, extend, release, models,
+  return { availability, create, get, extend, release, models, quantSettings, setStrataQuant, startQuantSetup,
     activeModel: () => current?.state === 'ready' ? current.model : null,
+    activeInferenceModel: () => current?.state === 'ready' ? current.effective_model : null,
     hasActive: () => Boolean(current && current.state !== 'idle') };
 }
 
