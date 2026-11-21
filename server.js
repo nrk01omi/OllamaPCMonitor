@@ -70,15 +70,17 @@ const gpuServices = createGpuServiceManager({
   pauseFile: path.join(process.env.ProgramData || 'C:\\ProgramData', 'gpu-host-guard', 'intentional-pause.json'),
   log: (...args) => console.log('[gpu-services]', ...args)
 });
+let modelSessions;
 const sglangServices = createSglangServiceManager({
   scriptsDir: path.join(root, 'scripts'),
   stateFile: path.join(dataDir, 'sglang-services-state.json'),
   checkOllamaGpu,
   getStrataQuant: () => modelSessions ? modelSessions.quantSettings() : { selected: 'IQ2_XS', prepared: false },
+  getMayaSettings: () => modelSessions ? modelSessions.mayaSettings() : { prepared: false },
+  getDeepSeekSettings: () => modelSessions ? modelSessions.deepSeekSettings() : { prepared: false },
   log: (...args) => console.log('[sglang-services]', ...args),
   onActivityChange: (active) => sleepGuard.setActive(active)
 });
-let modelSessions;
 modelSessions = createModelSessions({
   stateFile: path.join(dataDir, 'model-sessions-state.json'), scriptsDir: path.join(root, 'scripts'),
   checkOllamaGpu,
@@ -90,6 +92,20 @@ modelSessions = createModelSessions({
     child.stderr.on('data', (chunk) => onLine(String(chunk).trimEnd()));
     child.once('error', reject);
     child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`IQ3_XXS setup exited with code ${code}`)));
+  }),
+  startMayaSetupRunner: (onLine) => new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'scripts', 'Prepare-Maya.ps1')], { windowsHide: true });
+    child.stdout.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.stderr.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Project Maya setup exited with code ${code}`)));
+  }),
+  startMayaVisionSetupRunner: (onLine) => new Promise((resolve, reject) => {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(root, 'scripts', 'Prepare-Maya-Vision.ps1')], { windowsHide: true });
+    child.stdout.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.stderr.on('data', (chunk) => onLine(String(chunk).trimEnd()));
+    child.once('error', reject);
+    child.once('close', (code) => code === 0 ? resolve() : reject(new Error(`Project Maya Vision setup exited with code ${code}`)));
   }),
   log: (...args) => console.log('[model-sessions]', ...args)
 });
@@ -345,6 +361,17 @@ async function handlePresenceApi(req, res, url) {
     return asJson(res, await gpuServices.getStatus());
   }
   if (url.pathname === '/monitor/api/strata-quant' && req.method === 'GET') return asJson(res, modelSessions.quantSettings());
+  if (url.pathname === '/monitor/api/maya' && req.method === 'GET') return asJson(res, modelSessions.mayaSettings());
+  if (url.pathname === '/monitor/api/maya/setup' && req.method === 'POST') {
+    if (modelSessions.hasActive()) return asJson(res, { error: 'Release the active model session before setup' }, 409);
+    try { return asJson(res, await modelSessions.startMayaSetup(), 202); }
+    catch (error) { return asJson(res, { error: error.message, code: error.code }, error.status || 500); }
+  }
+  if (url.pathname === '/monitor/api/maya/vision-setup' && req.method === 'POST') {
+    if (modelSessions.hasActive()) return asJson(res, { error: 'Release the active model session before setup' }, 409);
+    try { return asJson(res, await modelSessions.startMayaVisionSetup(), 202); }
+    catch (error) { return asJson(res, { error: error.message, code: error.code }, error.status || 500); }
+  }
   if (url.pathname === '/monitor/api/strata-quant' && req.method === 'POST') {
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'Invalid JSON' }, 400); }
@@ -367,6 +394,7 @@ async function handlePresenceApi(req, res, url) {
   if (url.pathname === '/monitor/api/sglang-services' && req.method === 'GET') return asJson(res, await sglangStatus());
   if (url.pathname === '/monitor/api/sglang-services' && req.method === 'POST') {
     if (modelSessions.hasActive()) return asJson(res, { error: 'OPM model session is active' }, 409);
+    if (modelSessions.mayaSettings().setup.state === 'running') return asJson(res, { error: 'Project Maya setup is running' }, 409);
     let input;
     try { input = JSON.parse((await readRequestBody(req)).toString('utf8')); } catch { return asJson(res, { error: 'invalid JSON' }, 400); }
     try {
@@ -410,7 +438,7 @@ async function handlePresenceApi(req, res, url) {
 
 const monitor = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services' || url.pathname === '/monitor/api/sglang-services' || url.pathname.startsWith('/monitor/api/strata-quant')) {
+  if (url.pathname === '/monitor/api/presence' || url.pathname === '/monitor/api/work-hold' || url.pathname === '/monitor/api/gpu-services' || url.pathname === '/monitor/api/sglang-services' || url.pathname.startsWith('/monitor/api/strata-quant') || url.pathname.startsWith('/monitor/api/maya')) {
     return handlePresenceApi(req, res, url).catch((error) => asJson(res, { error: error.message }, 500));
   }
   if (url.pathname === '/monitor/api/summary') return asJson(res, aggregate(Number(url.searchParams.get('hours')) || 24, url.searchParams.get('include_non_work') === '1'));

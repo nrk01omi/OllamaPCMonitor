@@ -7,6 +7,9 @@ const BACKENDS = {
   strata128kvision: { port: 18082, model: 'qwen3.8-flash-next-iq2_xs' },
   qwen38: { port: 30000, model: 'qwen3.8-27b' },
   qwen3coder: { port: 30001, model: 'qwen3-coder-30b' },
+  glm53flash: { port: 8080, model: 'glm-5.3-flash' },
+  glm53flashvision: { port: 8080, model: 'glm-5.3-flash' },
+  deepseekflashvision: { port: 8080, model: 'deepseek-v4.1-flash' },
   // Flide inside WSL2; reached through localhost forwarding like SGLang.
   onejev9b: { port: 8083, model: 'onejev1.6-9b' }
 };

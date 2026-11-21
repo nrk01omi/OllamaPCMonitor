@@ -159,3 +159,8 @@ OPM が GPU PC を使う間は、NKS 側にも期限付きの「外部 LLM セ�
 - 起動が成功すると Strata の実効状態が `loaded=true` / `131072` になり、その後に限り OPM の `/v1/chat/completions` が Strata に届く。
 - OPM の画面から終了した場合、実行中の要求が終わってから Strata を停止し、セッションが止めた補助サービスだけ復帰する。
 - OPM 障害・PC 再起動・起動失敗・TTL 失効の各場合に、セッションが残留せず、電源抑止と GPU 排他が整合する。
+## Project Maya / GLM-5.3-Flash Maya-XS
+
+2026-11-20: Project Maya をモデルセッション ID `glm53flash` として追加。ローカル推論 API は `127.0.0.1:8080`、OPM の共通 OpenAI 互換 API は従来どおり `8082`。実効モデル ID は `glm-5.3-flash`。ready 判定では Project Maya `/health` のモデル ID と `max_context=131072` を確認する。対象構成はテキスト専用 Maya-XS / 128K。
+
+公式 GGUF 2 shard の取得・検証後、ダッシュボードから初回エンジン構築を実行できる。セットアップ先は `C:\Apps\ProjectMaya` と `D:\Maya-data\models`。初期セットアップでは推論サーバーを起動しない。他の管理モデルが起動中、または GPU 0 の空きが24GiB未満ならセットアップ・起動を拒否する。起動・停止は管理 PID のみを対象にし、セッション ready 前に API の状態を確認する。停止中も `GET /control/v1/model-sessions` と `/v1/models` にモデルを掲載する。

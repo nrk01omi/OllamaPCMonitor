@@ -7,6 +7,9 @@ const MODELS = {
   qwen38: { label: 'Qwen3.8-27B', port: 30000, start: 'Start-Qwen38-SGLang.ps1', stop: 'Stop-Qwen38-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen38.pid' },
   qwen3coder: { label: 'Qwen3-Coder-30B', port: 30001, start: 'Start-Qwen3Coder-SGLang.ps1', stop: 'Stop-Qwen3Coder-SGLang.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\sglang-qwen3coder.pid' },
   onejev9b: { label: 'OneJev 9B (判定専用)', port: 8083, api: 'systemone', inferenceModel: 'onejev1.6-9b', start: 'Start-OneJev-Flide.ps1', stop: 'Stop-OneJev-Flide.ps1', pidFile: '\\\\wsl$\\Ubuntu-22.04-RAG\\root\\run\\flide-onejev.pid' },
+  glm53flash: { label: 'GLM-5.3-Flash / Project Maya Maya-XS 128K (Vision なし)', port: 8080, api: 'maya', inferenceModel: 'glm-5.3-flash', contextWindow: 131072, vision: false, start: 'Start-Maya-Managed.ps1', stop: 'Stop-Maya-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'maya-managed.pid') },
+  glm53flashvision: { label: 'GLM-5.3-Flash / Project Maya Maya-XS 128K (Vision あり)', port: 8080, api: 'maya', inferenceModel: 'glm-5.3-flash', contextWindow: 131072, vision: true, start: 'Start-Maya-Managed.ps1', stop: 'Stop-Maya-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'maya-managed.pid') },
+  deepseekflashvision: { label: 'DeepSeek-V4.1-Flash / Project Maya Maya-XS 64K (Vision あり)', port: 8080, api: 'maya', inferenceModel: 'deepseek-v4.1-flash', contextWindow: 65536, vision: true, start: 'Start-DeepSeek-Managed.ps1', stop: 'Stop-DeepSeek-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'deepseek-managed.pid') },
   strata128k: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision なし)', port: 18082, vision: false, start: 'Start-Strata-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') },
   strata128kvision: { label: 'Qwen3.8-Flash-Next / Strata 128K (Vision あり)', port: 18082, vision: true, start: 'Start-Strata-Vision-Managed.ps1', stop: 'Stop-Strata-Managed.ps1', pidFile: require('node:path').join(__dirname, 'data', 'strata-managed.pid') }
 };
@@ -18,7 +21,7 @@ function runScript(script, args = []) {
   }));
 }
 
-function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = async () => {}, getStrataQuant = () => ({ selected: 'IQ2_XS', prepared: false }), log = () => {}, onActivityChange = () => {} }) {
+function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = async () => {}, getStrataQuant = () => ({ selected: 'IQ2_XS', prepared: false }), getMayaSettings = () => ({ prepared: false }), getDeepSeekSettings = () => ({ prepared: false }), log = () => {}, onActivityChange = () => {} }) {
   let state = { holdUntil: null, operation: 'idle', selected: null, startedAt: null, lastError: null };
   let timer = null;
   let serial = Promise.resolve();
@@ -42,17 +45,23 @@ function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = as
         const probabilities = reply.ok ? (await reply.json()).answers?.best?.probabilities : null;
         return [probabilities?.[0], probabilities?.[1]].every((value) => typeof value === 'number' && value >= 0 && value <= 1);
       }
-      const response = await fetch(`http://127.0.0.1:${model.port}/${model.vision !== undefined ? 'v1/status' : 'health'}`, { signal: AbortSignal.timeout(1200) });
+      const statusPath = model.api === 'maya' || model.vision === undefined ? 'health' : 'v1/status';
+      const response = await fetch(`http://127.0.0.1:${model.port}/${statusPath}`, { signal: AbortSignal.timeout(1200) });
       if (!response.ok) return false;
-      if (model.vision === undefined) return true;
       const status = await response.json();
+      if (model.api === 'maya') return status.status === 'ok' && status.model === model.inferenceModel && Number(status.max_context) === model.contextWindow && status.images === model.vision;
+      if (model.vision === undefined) return true;
       return status.loaded === true && status.context?.max_positions === 131072 &&
         status.vision?.enabled === model.vision && (!model.vision || status.vision?.available === true);
     } catch { return false; }
   };
   const run = (fn) => { serial = serial.then(fn, fn); return serial; };
   async function status() {
-    const models = await Promise.all(Object.entries(MODELS).map(async ([id, model]) => ({ id, label: model.label, port: 8082, running: await health(model) })));
+    const maya = getMayaSettings();
+    const deepseek = getDeepSeekSettings();
+    const models = await Promise.all(Object.entries(MODELS).map(async ([id, model]) => ({ id, label: model.label, port: model.port,
+      running: await health(model), ...(id === 'glm53flash' || id === 'glm53flashvision' ? { prepared: Boolean(maya.variants ? maya.variants[id]?.prepared : maya.prepared) } : {}),
+      ...(id === 'deepseekflashvision' ? { prepared: Boolean(deepseek.prepared) } : {}) })));
     const selected = models.find((model) => model.id === state.selected);
     if (state.operation === 'starting' && selected?.running) {
       state.operation = 'running'; state.lastError = null; save();
@@ -113,20 +122,31 @@ function createSglangServiceManager({ scriptsDir, stateFile, checkOllamaGpu = as
       // that service is already stopped, and would prevent Strata from starting.
       const runningIds = new Set(current.models.filter((model) => model.running).map((model) => model.id));
       const stopScripts = [...new Set(Object.entries(MODELS)
-        .filter(([other, model]) => other !== id && runningIds.has(other))
+        .filter(([other]) => other !== id && runningIds.has(other))
         .map(([, model]) => model.stop))];
       await Promise.all(stopScripts.map((script) => runScript(require('node:path').join(scriptsDir, script))));
       state.operation = 'starting'; state.selected = id; state.startedAt = new Date().toISOString(); state.lastError = null; save();
       await reportActivity(true);
       try {
-        if (MODELS[id].vision === undefined) await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
+        // Only the WSL2 SGLang services use Windows portproxy on 30000/30001.
+        // Native Project Maya (8080) must start under its work hold without
+        // touching the administrator-only WSL portproxy configuration.
+        if (id === 'qwen38' || id === 'qwen3coder')
+          await runScript(require('node:path').join(scriptsDir, 'sync-sglang-portproxy.ps1'));
         const scriptArgs = [];
-        if (MODELS[id].vision !== undefined) {
+        if (MODELS[id].vision !== undefined && id.startsWith('strata')) {
           const quant = getStrataQuant();
           if (!['IQ2_XS', 'IQ3_XXS'].includes(quant.selected)) throw new Error(`Unsupported Strata quantization: ${quant.selected}`);
           if (quant.selected === 'IQ3_XXS' && !quant.prepared) throw new Error('IQ3_XXS is selected but not prepared');
           scriptArgs.push('-Quant', quant.selected);
         }
+        if (id === 'glm53flash' || id === 'glm53flashvision') {
+          if (!getMayaSettings().variants?.[id]?.prepared)
+            throw new Error(`${MODELS[id].label} is not prepared. Use the Project Maya setup button first.`);
+          if (MODELS[id].vision) scriptArgs.push('-Vision');
+        }
+        if (id === 'deepseekflashvision' && !getDeepSeekSettings().prepared)
+          throw new Error(`${MODELS[id].label} is not prepared. Complete the Project Maya DeepSeek setup first.`);
         await runScript(require('node:path').join(scriptsDir, MODELS[id].start), scriptArgs);
       }
       catch (error) { state.operation = 'failed'; state.lastError = error.message; save(); await reportActivity(false); throw error; }

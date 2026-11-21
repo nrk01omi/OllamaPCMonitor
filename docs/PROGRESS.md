@@ -1,5 +1,25 @@
 # OllamaPCMonitor 進捗ログ
 
+### 2026-11-21（CSV走行経路ビューア・コーディングエージェント比較）
+- 同じ実走行CSV（89,884行、GPS有効89,880・無効4）でGLM-5.3-Flash / DeepSeek-V4.1-Flash / Qwen3.8-Flash-Nextにスマホ向け走行経路ビューアを実装させた。
+- GLM: 67.7分/24ラウンド/32 calls。テスト8回失敗。独立ブラウザでUI・21 lap・Canvasを確認したが、ヘッダーを行数に含め89,885/skip5と1行ずれ。
+- DeepSeek: HTTP timeout 1,800秒で長い応答が2度打ち切り。runner timeoutを7,200秒へ変更後、62.2分/5ラウンド/8 callsで終了したが検索だけでコード生成なし。
+- Qwen: 9.3分/24ラウンド/28 calls。3ファイル生成、テスト6回失敗。HTMLに診断用偽描画コードが残り、CSSでhidden指定が見えたままになる。合計有効GPS数の表示も欠ける。
+- 完走したモデルはなし。課題・条件・詳細結果は `docs/coding-agent-circuit-csv-benchmark-2026-11-21.md`。成果物は `%TEMP%\opm-trackapp-bench-20261121-01\`。
+- 全モデル停止と8080/18082閉鎖を確認。work-hold/sleep guardはユーザー了解待ちで維持（23:08 JST期限）。
+
+### 2026-11-21（Maya context scaling coding benchmark）
+- Maya-XS-IQ1_S text-only をOPM経由で128K/256K/384K/512Kで計測。各構成につき220-token短文と、tokenizer実測でcontextの約98%を使う同一コーディング依頼を1回実施。詳細は `docs/maya-context-scaling-coding-benchmark-2026-11-21.md`。
+- 長文prefill 1,900.5〜2,039.5 tok/s、長文後decode 20.8〜23.9 tok/s。128K→512Kで入力4.05倍、prefill時間65.5→272.2秒（約4.16倍）。固定短文ではcontext設定単独の速度差は明瞭でない。各条件1回、512K応答は出力上限に到達。
+- 512Kで推論完了。テスト後OPM停止、8080 closed。context設定とready判定コードを試験前状態へ戻し、OPM idle・work_hold・sleep guardを独立確認。work_holdは報告後の了解まで維持。
+- 計測の生JSONとprompt: `data/maya-context-coding-benchmark/`。WordPress投稿は今回依頼に含まれず未実施。
+
+### 2026-11-21（Vision複合画像比較・RTX 3090追加評価）
+- 同じ合成4×4画像・質問・temperature 0・1024 token上限をOPMゲートウェイ8082経由で各3回試験。Strata IQ3_XXS Visionは7項目すべて3回正答（初回6.52秒、キャッシュあり平均4.60秒、再試行生成速度平均約199.9 tok/s）。Maya-XS Visionは5/7、5/7、6/7（初回27.92秒、キャッシュあり平均9.57秒、再試行生成速度平均約44.6 tok/s）。詳細は `docs/vision-complex-comparison-2026-11-21.md`。
+- RTX 3090追加評価: Ryzen 9 9900X / ASUS X870 MAX GAMING WIFI7 / RTX 5090 32GB。追加GPU用PCIe 4.0 x16形状スロットは仕様上x1。現在のMaya/Strata構成はGPU 0指定で、3090は挿すだけでは利用されない。PSU・ケース寸法・3090型番は未確認。詳細は `docs/rtx-3090-addition-assessment-2026-11-21.md`。
+- 12:39 JSTの再確認ではOPMがStrata Visionの別model-sessionをready（12:33:16〜13:03:16 JST）と記録し、手動停止/hold延長はHTTP 409。期限後の13:09再確認ではOPM idle、8080/18082閉鎖。発生元は未確認。
+- ユーザー指定 `C:\Apps\nas-knowledge-stack\.env` を認証元に使用し、公開中の作業ログID 56へ比較結果とRTX 3090評価を追記。別経路の公開GETでstatus `publish`、各数値とMerPress描画を確認。URL: https://nas-ugreen.tail9ac64d.ts.net/session-progress-log/。
+- 以前のwork-holdは13:03 JSTに自然期限切れ。ユーザーの「報告と了解まで解除しない」指示に沿い、投稿前にOPM work-holdを30分再登録。presenceで`work_hold`とsleepGuard active/runningを確認。新期限13:39:36 JST。モデルは停止、work-holdは明示解除していない。
 ## 2026-10-08
 
 **実施・確認**

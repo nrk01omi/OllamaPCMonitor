@@ -54,6 +54,7 @@
   let live = null;
   let gpuServices = null;
   let sglangServices = null;
+  let mayaSettings = null;
   let strataQuant = null;
   let strataQuantDirty = false;
   let unreachable = false;
@@ -165,6 +166,66 @@
     $('strata-quant-select').addEventListener('change', () => { strataQuantDirty = true; });
   }
 
+  function createMayaSetupPanel() {
+    const panel = document.createElement('section');
+    panel.className = 'agent-services-card';
+    panel.innerHTML = '<div class="agent-services-title"><span>Project Maya / GLM-5.3-Flash Maya-XS</span><small id="maya-note">状態を確認中</small></div><div class="quant-controls"><button type="button" id="maya-setup">エンジンを準備</button><button type="button" id="maya-vision-setup">Visionを追加準備</button></div><small id="maya-output"></small>';
+    $('sglang-list').closest('section').after(panel);
+    $('maya-setup').addEventListener('click', prepareMaya);
+    $('maya-vision-setup').addEventListener('click', prepareMayaVision);
+  }
+
+  async function refreshMaya() {
+    try {
+      const response = await fetch('/monitor/api/maya', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      mayaSettings = await response.json();
+      if (!$('maya-setup')) createMayaSetupPanel();
+      const setup = mayaSettings.setup || {};
+      const visionSetup = mayaSettings.vision_setup || {};
+      const textPrepared = mayaSettings.variants?.glm53flash?.prepared ?? mayaSettings.prepared;
+      const visionPrepared = mayaSettings.variants?.glm53flashvision?.prepared ?? false;
+      const partial = Number(mayaSettings.downloaded_bytes || 0);
+      const expected = Number(mayaSettings.expected_bytes || 73400000000);
+      $('maya-note').textContent = setup.state === 'running' ? '初回セットアップ中' : setup.state === 'failed'
+        ? `セットアップ失敗: ${setup.error}` : visionSetup.state === 'running' ? 'Vision追加準備中（CUDAエンジン構築・約1.14GB取得）' : visionSetup.state === 'failed' ? `Vision準備失敗: ${visionSetup.error}` : visionPrepared ? 'Vision / テキスト両モード準備完了・128K' : textPrepared ? 'テキスト準備完了・Vision追加準備が可能・128K' : mayaSettings.model_downloaded
+          ? '重み取得済み・エンジン未構築' : partial > 0 ? `モデル取得中 ${(partial / 1e9).toFixed(1)} / ${(expected / 1e9).toFixed(1)} GB`
+            : 'モデル未取得';
+      $('maya-setup').textContent = mayaSettings.prepared ? '準備完了' : setup.state === 'running' ? '準備中' : 'エンジンを準備';
+      $('maya-setup').disabled = busy || setup.state === 'running' || mayaSettings.prepared || !mayaSettings.model_downloaded;
+      $('maya-vision-setup').textContent = visionPrepared ? 'Vision準備完了' : visionSetup.state === 'running' ? 'Vision準備中' : 'Visionを追加準備';
+      $('maya-vision-setup').disabled = busy || !textPrepared || visionPrepared || visionSetup.state === 'running' || setup.state === 'running';
+      $('maya-output').textContent = (visionSetup.output || setup.output) ? (visionSetup.output || setup.output).split('\n').filter(Boolean).slice(-2).join(' / ') : 'Vision追加準備はCUDAエンジンを構築し、約1.14GBを取得します。GPUが空いているときに実行します。';
+    } catch { /* monitor may be restarting */ }
+  }
+
+  async function prepareMayaVision() {
+    $('maya-vision-setup').disabled = true;
+    try {
+      const response = await fetch('/monitor/api/maya/vision-setup', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      mayaSettings = data;
+      $('pr-message').className = 'pr-message'; $('pr-message').textContent = 'Project MayaのVision追加準備を開始しました';
+      await refreshMaya();
+    } catch (error) { $('maya-vision-setup').disabled = false; $('pr-message').className = 'pr-message err'; $('pr-message').textContent = error.message; }
+  }
+
+  async function prepareMaya() {
+    $('maya-setup').disabled = true;
+    try {
+      const response = await fetch('/monitor/api/maya/setup', { method: 'POST' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      mayaSettings = data;
+      $('pr-message').className = 'pr-message'; $('pr-message').textContent = 'Project Mayaの初回セットアップを開始しました';
+      await refreshMaya();
+    } catch (error) {
+      $('maya-setup').disabled = false;
+      $('pr-message').className = 'pr-message err'; $('pr-message').textContent = error.message;
+    }
+  }
+
   async function refreshStrataQuant() {
     try {
       const response = await fetch('/monitor/api/strata-quant', { cache: 'no-store' });
@@ -221,7 +282,7 @@
     if (!starting) return;
     const elapsed = Math.max(0, Math.floor((Date.now() - Date.parse(sglangServices.startedAt || Date.now())) / 1000));
     $('sglang-modal-detail').textContent = `${sglangServices.selected || '大型 LLM'} を起動中（${elapsed} 秒）。完了まで操作しないでください。`;
-    const steps = sglangServices.selected === 'onejev9b' ? ['GPU 解放を確認', 'WSL2 / Flide プロセスを開始', 'モデル重みをロード（fp8）', '判定の応答を確認'] : sglangServices.selected?.startsWith('strata128k') ? ['GPU 解放を確認', 'Strata プロセスを開始', '128K 設定を確認', 'モデル重みをロード', 'API の起動を確認'] : ['GPU 解放を確認', 'WSL2 / SGLang プロセスを開始', 'モデル重みをロード', 'NVFP4 カーネルを準備', 'API の起動を確認'];
+    const steps = sglangServices.selected === 'onejev9b' ? ['GPU 解放を確認', 'WSL2 / Flide プロセスを開始', 'モデル重みをロード（fp8）', '判定の応答を確認'] : sglangServices.selected === 'deepseekflashvision' ? ['GPU 解放を確認', 'Project Maya DS4エンジンを開始', 'Maya-XS重みをロード', 'Vision / 64K APIの起動を確認'] : sglangServices.selected?.startsWith('glm53flash') ? ['GPU 解放を確認', 'Project Maya エンジンを開始', 'Maya-XS 重みをロード', '128K API の起動を確認'] : sglangServices.selected?.startsWith('strata128k') ? ['GPU 解放を確認', 'Strata プロセスを開始', '128K 設定を確認', 'モデル重みをロード', 'API の起動を確認'] : ['GPU 解放を確認', 'WSL2 / SGLang プロセスを開始', 'モデル重みをロード', 'NVFP4 カーネルを準備', 'API の起動を確認'];
     const active = elapsed < 8 ? 1 : elapsed < 45 ? 2 : elapsed < 180 ? 3 : 4;
     $('sglang-modal-flow').replaceChildren(...steps.map((label, index) => {
       const item = document.createElement('li'); item.className = index < active ? 'done' : index === active ? 'active' : ''; item.textContent = label; return item;
@@ -244,10 +305,11 @@
       const item = document.createElement('div');
       item.className = `agent-service ${model.running ? 'running' : 'stopped'}`;
       const name = document.createElement('b'); name.textContent = model.label;
-      const status = document.createElement('small'); status.textContent = `${model.running ? '起動中' : '停止中'} / :${model.port}`;
+      const needsPrepare = (model.id === 'glm53flash' || model.id === 'glm53flashvision' || model.id === 'deepseekflashvision') && !model.prepared;
+      const status = document.createElement('small'); status.textContent = `${model.running ? '起動中' : '停止中'}${needsPrepare ? ' / 初回準備が必要' : ''} / :${model.port}`;
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'sglang-toggle'; button.textContent = model.running ? '停止' : '起動';
-      button.disabled = busy || starting || !enabled;
+      button.disabled = busy || starting || !enabled || (needsPrepare && !model.running);
       button.addEventListener('click', () => setSglangModel(model.running ? null : model.id));
       item.append(name, status, button); list.append(item);
     }
@@ -346,6 +408,7 @@
     renderGpu();
     renderGpuServices();
     renderSglangServices();
+    await refreshMaya();
     await refreshStrataQuant();
     renderSglangStartModal();
   }

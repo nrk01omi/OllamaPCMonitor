@@ -1,5 +1,25 @@
 $ErrorActionPreference = 'Stop'
 
+# Older monitor processes may still invoke this helper for every non-Strata
+# model.  Project Maya is native on port 8080 and never needs these WSL proxies.
+# Its selector records ownership before invoking the start script.
+$serviceState = Join-Path $PSScriptRoot '..\data\sglang-services-state.json'
+$sessionState = Join-Path $PSScriptRoot '..\data\model-sessions-state.json'
+try {
+    $service = Get-Content -LiteralPath $serviceState -Raw | ConvertFrom-Json
+    if ($service.selected -eq 'glm53flash' -and $service.operation -in @('starting', 'running')) {
+        Write-Host 'Skipping WSL2 portproxy refresh for native Project Maya (8080).'
+        exit 0
+    }
+} catch { }
+try {
+    $session = Get-Content -LiteralPath $sessionState -Raw | ConvertFrom-Json
+    if ($session.model -eq 'glm53flash' -and $session.state -eq 'starting') {
+        Write-Host 'Skipping WSL2 portproxy refresh for native Project Maya (8080).'
+        exit 0
+    }
+} catch { }
+
 # WSL2 uses a dynamic NAT address. Refresh Windows' listeners every time a
 # SGLang model is started so LAN and Tailscale callers keep reaching WSL2.
 $distro = 'Ubuntu-22.04-RAG'
