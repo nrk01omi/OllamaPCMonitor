@@ -36,7 +36,11 @@
       $('power-state').className = 'power-ok';
       const guard = snap.sleepGuard && snap.sleepGuard.running ? 'ローカルsleep guard有効' : 'ローカルsleep guard起動を確認中';
       const until = remoteState === 'grace' && snap.remoteSession.graceUntil ? `（${when(snap.remoteSession.graceUntil)}まで）` : '';
-      const nas = snap.remoteSession.nasFieldRejected ? 'NASがremote_sessionを拒否（ローカルガードのみ）' : `NAS心拍 remote_session=${remoteState}送信中（NAS判断反映は未確認）`;
+      const nasBlocks = snap.nks && snap.nks.response && Array.isArray(snap.nks.response.sleep_blocked_by)
+        ? snap.nks.response.sleep_blocked_by.includes('remote_session') : false;
+      const nas = snap.nks && snap.nks.status === 'ok'
+        ? nasBlocks ? 'NASがremote_sessionを抑止理由として確認済み' : `NAS心拍 remote_session=${remoteState}送信中（抑止理由は未確認）`
+        : `NAS通信未確認・remote_session=${remoteState}`;
       $('power-detail').textContent = `${guard}${until} ／ ${nas}`;
     } else if (localBusy) {
       $('power-state').textContent = '● 稼働中・Ollama 作業中';

@@ -13,6 +13,17 @@ const { createModelSessions } = require('./model-sessions');
 const { createInferenceGateway } = require('./inference-gateway');
 const { createOllamaGpuCheck } = require('./ollama-gpu-check');
 const { spawn } = require('node:child_process');
+const util = require('node:util');
+
+// Timestamp every emitted line because the scheduled task appends console output
+// directly to data/monitor.log.
+for (const method of ['log', 'info', 'warn', 'error', 'debug']) {
+  const original = console[method].bind(console);
+  console[method] = (...args) => {
+    for (const line of util.format(...args).split(/\r?\n/))
+      original(`[${new Date().toISOString()}] ${line}`);
+  };
+}
 
 const root = __dirname;
 

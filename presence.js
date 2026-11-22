@@ -11,7 +11,7 @@ const POWERCFG_ARGS = ['/q', 'SCHEME_CURRENT', '238c9fa8-0aad-41ed-83f4-97be242c
 // Only real inference counts as "local use". Polling calls (/api/ps, /api/tags) must not,
 // otherwise the dashboard's own status refresh would keep local_busy on forever.
 const INFERENCE_PATH = /^\/(api\/(chat|generate|embed|embeddings)|v1\/(chat\/completions|completions|embeddings))\/?$/;
-const PROBE_FRESH_MS = 5000;
+const PROBE_FRESH_MS = 15000;
 const REMOTE_DISCONNECT_GRACE_MS = 15 * 60 * 1000;
 
 function isInferencePath(url) {
@@ -34,7 +34,7 @@ function createPresence(opts) {
   let stopped = false;
   let probeChild = null;
   let probe = { idleSec: null, locked: null, foregroundProcess: null, updatedAt: 0 };
-  let remoteSession = { state: 'unknown', probeState: 'unknown', updatedAt: 0, graceUntil: null, previousState: 'unknown' };
+  let remoteSession = { state: 'unknown', probeState: 'unknown', updatedAt: 0, changedAt: new Date().toISOString(), graceUntil: null };
   let remoteGraceTimer = null;
   let standbyTimeoutMin = null;
   let localLastAt = null;
@@ -42,8 +42,6 @@ function createPresence(opts) {
   const nks = { response: null, receivedAt: null, lastOkAt: null, lastAttemptAt: null, consecutiveFailures: 0, lastError: null };
   const timers = [];
   let heartbeatInFlight = false;
-  let remoteSessionFieldSupported = true;
-  let remoteSessionFieldRetryAt = 0;
   let lastResumeAt = 0;
   let lastInjectedInput = null;
   const power = {
@@ -61,6 +59,7 @@ function createPresence(opts) {
   function setRemoteSessionState(probeState) {
     if (!['active', 'disconnected', 'none', 'unknown'].includes(probeState)) return;
     const now = Date.now();
+    const stateBefore = remoteSession.state;
     const previousProbeState = remoteSession.probeState;
     remoteSession.probeState = probeState;
     remoteSession.updatedAt = now;
@@ -77,9 +76,11 @@ function createPresence(opts) {
         remoteGraceTimer = setTimeout(() => {
           remoteGraceTimer = null;
           if (remoteSession.probeState === 'disconnected') {
+            const previousState = remoteSession.state;
             remoteSession.state = 'none';
+            remoteSession.changedAt = new Date().toISOString();
             remoteSession.graceUntil = null;
-            log('remote RDP grace expired');
+            log(`remote RDP grace expired (${previousState} -> none)`);
             opts.onRemoteSessionChange?.('none');
           }
         }, REMOTE_DISCONNECT_GRACE_MS);
@@ -94,11 +95,24 @@ function createPresence(opts) {
       remoteSession.state = probeState;
       remoteSession.graceUntil = null;
     }
-    if (remoteSession.state !== remoteSession.previousState) {
-      log(`remote RDP state: ${remoteSession.previousState} -> ${remoteSession.state}`);
-      remoteSession.previousState = remoteSession.state;
+    if (remoteSession.state !== stateBefore) {
+      remoteSession.changedAt = new Date(now).toISOString();
+      log(`remote RDP state: ${stateBefore} -> ${remoteSession.state}`);
     }
     opts.onRemoteSessionChange?.(remoteSession.state);
+  }
+
+  function checkRemoteSessionFreshness() {
+    if (!remoteSession.updatedAt || Date.now() - remoteSession.updatedAt <= PROBE_FRESH_MS || remoteSession.state === 'unknown') return;
+    const previousState = remoteSession.state;
+    if (remoteGraceTimer) clearTimeout(remoteGraceTimer);
+    remoteGraceTimer = null;
+    remoteSession.state = 'unknown';
+    remoteSession.probeState = 'unknown';
+    remoteSession.changedAt = new Date(remoteSession.updatedAt + PROBE_FRESH_MS).toISOString();
+    remoteSession.graceUntil = null;
+    log(`remote RDP state became unknown after stale probe (${previousState} -> unknown)`);
+    opts.onRemoteSessionChange?.('unknown');
   }
 
   // ---- local addresses -------------------------------------------------------------------
@@ -270,23 +284,15 @@ function createPresence(opts) {
     heartbeatInFlight = true;
     try {
       const now = Date.now();
+      checkRemoteSessionFreshness();
       const body = { host: hostId, source: `ollama-pc-monitor/${version}`, sent_at: new Date(now).toISOString(), local_busy: localBusy(now) };
-      if (remoteSessionFieldSupported || now >= remoteSessionFieldRetryAt)
-        body.remote_session = now - remoteSession.updatedAt <= PROBE_FRESH_MS ? remoteSession.state : 'unknown';
+      body.remote_session = remoteSession.state;
+      body.remote_session_since = remoteSession.changedAt;
       if (probeAlive(now)) { body.idle_sec = probe.idleSec; body.session_locked = probe.locked; } // stale/unknown is omitted, never sent as 0/false
       if (standbyTimeoutMin !== null) body.standby_timeout_min = standbyTimeoutMin;
       if (localLastAt) body.local_last_at = new Date(localLastAt).toISOString();
       if (localModel) body.local_model = localModel;
-      try { await nksRequest('POST', '/api/power/pc-presence', body); remoteSessionFieldSupported = true; }
-      catch (error) {
-        if (error.status !== 422 || !Object.hasOwn(body, 'remote_session')) throw error;
-        remoteSessionFieldSupported = false;
-        remoteSessionFieldRetryAt = now + 5 * 60 * 1000;
-        const compatibleBody = { ...body };
-        delete compatibleBody.remote_session;
-        log('NAS rejected remote_session field; retrying heartbeat without it and checking support again in 5 minutes');
-        await nksRequest('POST', '/api/power/pc-presence', compatibleBody);
-      }
+      await nksRequest('POST', '/api/power/pc-presence', body);
     } catch (error) {
       log('heartbeat failed:', nks.lastError);
     } finally { heartbeatInFlight = false; }
@@ -344,7 +350,7 @@ function createPresence(opts) {
       nksUrl: configured ? nksUrl : null,
       probe: { alive, idleSec: alive ? probe.idleSec : null, locked: alive ? probe.locked : null, foregroundProcess: alive ? probe.foregroundProcess : null, updatedAt: probe.updatedAt || null },
       remoteSession: { state: now - remoteSession.updatedAt <= PROBE_FRESH_MS ? remoteSession.state : 'unknown', updatedAt: remoteSession.updatedAt || null,
-        graceUntil: remoteSession.graceUntil, nasFieldRejected: !remoteSessionFieldSupported },
+        since: remoteSession.changedAt, graceUntil: remoteSession.graceUntil },
       // This process only runs while Windows is awake. A live probe therefore means
       // the PC is operating; the timestamps retain the most recent sleep cycle.
       power: { operating: alive, startedAt: power.startedAt, lastSuspendAt: power.lastSuspendAt, lastResumeAt: power.lastResumeAt },
@@ -377,6 +383,7 @@ function createPresence(opts) {
     });
     Promise.all([readStandbyTimeout(), firstProbeSample]).then(sendHeartbeat);
     every(60000, refreshLanAddresses);
+    every(1000, checkRemoteSessionFreshness);
     every(60000, readStandbyTimeout);
     every(5000, pollLocalOllama);
     every(3000, tailOllamaLog);
@@ -392,7 +399,7 @@ function createPresence(opts) {
     timers.forEach(clearInterval);
     if (remoteGraceTimer) clearTimeout(remoteGraceTimer);
     remoteGraceTimer = null;
-    opts.onRemoteSessionChange?.('unknown');
+    setRemoteSessionState('unknown');
     if (probeChild) probeChild.kill();
   }
 
