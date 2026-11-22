@@ -61,6 +61,7 @@ const presence = createPresence({
   onPowerEvent: appendPowerEvent,
   onIdleEvent: appendIdleEvent,
   onWorkHoldChange: (until) => sleepGuard.setWorkHoldUntil(until),
+  onRemoteSessionChange: (state) => sleepGuard.setRemoteSessionActive(state === 'active' || state === 'grace'),
   log: (...args) => console.log('[presence]', ...args)
 });
 
@@ -355,7 +356,7 @@ async function handlePresenceApi(req, res, url) {
   if (!isSameOriginRequest(req)) return asJson(res, { error: 'forbidden' }, 403);
   if (url.pathname === '/monitor/api/presence' && req.method === 'GET') {
     const snapshot = url.searchParams.has('refresh') ? await presence.refresh() : presence.getSnapshot();
-    return asJson(res, { ...snapshot, sleepGuard: { active: sleepGuard.active, running: sleepGuard.running } });
+    return asJson(res, { ...snapshot, sleepGuard: { active: sleepGuard.active, running: sleepGuard.running, reasons: sleepGuard.reasons } });
   }
   if (url.pathname === '/monitor/api/gpu-services' && req.method === 'GET') {
     return asJson(res, await gpuServices.getStatus());

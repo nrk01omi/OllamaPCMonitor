@@ -62,6 +62,8 @@ SGLang を RTX 5090 で安定運用するための GPU 排他・作業宣言連�
 
 作業宣言中、または大型 LLM がロード中・稼働中は `SetThreadExecutionState(ES_SYSTEM_REQUIRED)` で Windows のアイドル起因の自動スリープを抑止します。宣言とモデルの稼働がともに終わると解除され、手動スリープは妨げません。
 
+リモート状態の申告とスリープ抑止の連携仕様・実装状況は [リモート接続中のスリープ抑止仕様](docs/remote-session-sleep-guard-spec.md) を参照してください。
+
 ### 大型 LLM モデル起動
 
 ダッシュボードから SGLang の 2 モデル、または Qwen3.8-Flash-Next の Strata 128K を排他的に起動・停止できます。Strata は `C:\Apps\Strata` と `D:\Strata-data` を使い、API は `0.0.0.0:8082` で待ち受けます。Windows ファイアウォールの `Strata API 8082 (Tailscale only)` 規則で、Tailscale インターフェース上の `100.64.0.0/10` からの接続のみ許可します。初期設定または規則の再適用は管理者 PowerShell で `scripts\Configure-Strata-TailscaleFirewall.ps1` を実行してください。接続先は `http://<このPCのTailscale-IP>:8082/v1`、API キーは不要です。実測値は [Strata ベンチ結果](docs/strata-bench-2026-10-04.md) を参照してください。

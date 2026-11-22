@@ -10,6 +10,7 @@ function createSleepGuard({ script, log = () => {} }) {
   let wanted = false;
   let sglangActive = false;
   let sessionActive = false;
+  let remoteSessionActive = false;
   let workHoldUntil = 0;
   let expiryTimer = null;
 
@@ -33,8 +34,8 @@ function createSleepGuard({ script, log = () => {} }) {
   }
 
   function update() {
-    const next = sglangActive || sessionActive || workHoldUntil > Date.now();
-    if (next !== wanted) log(`sleep prevention ${next ? 'on' : 'off'} (work hold: ${workHoldUntil > Date.now()}, SGLang: ${sglangActive})`);
+    const next = sglangActive || sessionActive || remoteSessionActive || workHoldUntil > Date.now();
+    if (next !== wanted) log(`sleep prevention ${next ? 'on' : 'off'} (work hold: ${workHoldUntil > Date.now()}, SGLang: ${sglangActive}, model session: ${sessionActive}, remote session: ${remoteSessionActive})`);
     wanted = next;
     if (wanted) start();
     else if (child) { child.kill(); child = null; }
@@ -47,6 +48,11 @@ function createSleepGuard({ script, log = () => {} }) {
 
   function setSessionActive(active) {
     sessionActive = Boolean(active);
+    update();
+  }
+
+  function setRemoteSessionActive(active) {
+    remoteSessionActive = Boolean(active);
     update();
   }
 
@@ -64,10 +70,13 @@ function createSleepGuard({ script, log = () => {} }) {
   function stop() {
     sglangActive = false;
     sessionActive = false;
+    remoteSessionActive = false;
     setWorkHoldUntil(null);
   }
 
-  return { setActive, setSessionActive, setWorkHoldUntil, stop, get active() { return wanted; }, get running() { return Boolean(child); } };
+  return { setActive, setSessionActive, setRemoteSessionActive, setWorkHoldUntil, stop,
+    get active() { return wanted; }, get running() { return Boolean(child); },
+    get reasons() { return { sglang: sglangActive, modelSession: sessionActive, remoteSession: remoteSessionActive, workHold: workHoldUntil > Date.now() }; } };
 }
 
 module.exports = { createSleepGuard };

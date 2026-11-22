@@ -26,10 +26,18 @@
     const holds = response && Array.isArray(response.sleep_blocked_by) ? response.sleep_blocked_by : [];
     const localBusy = Boolean(snap && snap.local && snap.local.busy);
     const workHeld = holds.includes('work_hold');
+    const remoteState = snap && snap.remoteSession && snap.remoteSession.state;
     if (!operating) {
       $('power-state').textContent = '○ 状態を確認できません';
       $('power-state').className = 'power-unknown';
       $('power-detail').textContent = '監視プローブからの応答がありません';
+    } else if (remoteState === 'active' || remoteState === 'grace') {
+      $('power-state').textContent = remoteState === 'active' ? '● 稼働中・RDP接続中' : '● 稼働中・RDP再接続待ち';
+      $('power-state').className = 'power-ok';
+      const guard = snap.sleepGuard && snap.sleepGuard.running ? 'ローカルsleep guard有効' : 'ローカルsleep guard起動を確認中';
+      const until = remoteState === 'grace' && snap.remoteSession.graceUntil ? `（${when(snap.remoteSession.graceUntil)}まで）` : '';
+      const nas = snap.remoteSession.nasFieldRejected ? 'NASがremote_sessionを拒否（ローカルガードのみ）' : `NAS心拍 remote_session=${remoteState}送信中（NAS判断反映は未確認）`;
+      $('power-detail').textContent = `${guard}${until} ／ ${nas}`;
     } else if (localBusy) {
       $('power-state').textContent = '● 稼働中・Ollama 作業中';
       $('power-state').className = 'power-ok';
@@ -353,9 +361,11 @@
     const r = nks.response;
     $('pr-lastok').textContent = (nks.lastOkAt ? full(nks.lastOkAt) : '—') + (nks.status === 'failing' && nks.consecutiveFailures ? `（${nks.consecutiveFailures} 回連続で失敗）` : '');
     const { probe } = snap;
+    const remote = snap.remoteSession || { state: 'unknown' };
+    const remoteLabel = ({ active: 'RDP接続中', grace: `RDP切断猶予${remote.graceUntil ? ` 〜${when(remote.graceUntil)}` : ''}`, none: 'RDPなし', unknown: '判定不能' })[remote.state] || '判定不能';
     $('pr-measure').textContent = probe.alive
-      ? `無操作 ${probe.idleSec} 秒 ／ ロック: ${probe.locked ? 'あり' : 'なし'} ／ 待機設定: ${snap.standbyTimeoutMin === null ? '不明' : snap.standbyTimeoutMin === 0 ? '無効' : `${snap.standbyTimeoutMin} 分`}`
-      : '無操作: 測定できていません';
+      ? `無操作 ${probe.idleSec} 秒 ／ ロック: ${probe.locked ? 'あり' : 'なし'} ／ ${remoteLabel} ／ 待機設定: ${snap.standbyTimeoutMin === null ? '不明' : snap.standbyTimeoutMin === 0 ? '無効' : `${snap.standbyTimeoutMin} 分`}`
+      : `無操作: 測定できていません ／ ${remoteLabel}`;
 
     if (nks.status === 'unconfigured') { setStatus('不明', 'unknown', 'NKS が未設定です（環境変数 NKS_URL / NKS_API_KEY / NKS_HOST_ID）'); chips(['不明']); return; }
     if (nks.status === 'failing') { setStatus('不明', 'unknown', `NAS と通信できていません（寝かされる可能性があります）${nks.lastError ? `\n${nks.lastError}` : ''}`); chips(['不明']); return; }

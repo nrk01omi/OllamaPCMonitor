@@ -1,7 +1,7 @@
 param([Parameter(Mandatory = $true)][int]$ParentPid)
 
 # Resident probe for OllamaPCMonitor. Talks to the Node parent over stdout,
-# one ASCII line per message:  READY | S <idleSec> <locked 0/1> | E suspend | E resume
+# one ASCII line per message: READY | S <idleSec> <locked 0/1> | R <remote-state> | E suspend | E resume
 
 # Load C# code for GetLastInputInfo only once
 if (-not ([System.Management.Automation.PSTypeName]'LastInputHelper').Type) {
@@ -22,6 +22,16 @@ if (-not ([System.Management.Automation.PSTypeName]'LastInputHelper').Type) {
         static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")]
         static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+        [StructLayout(LayoutKind.Sequential)]
+        struct WTS_SESSION_INFO { public int SessionID; public IntPtr pWinStationName; public int State; }
+        [DllImport("wtsapi32.dll", SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool WTSEnumerateSessions(IntPtr hServer, uint Reserved, uint Version, out IntPtr ppSessionInfo, out int pCount);
+        [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        static extern bool WTSQuerySessionInformation(IntPtr hServer, int sessionId, int infoClass, out IntPtr ppBuffer, out int pBytesReturned);
+        [DllImport("wtsapi32.dll")]
+        static extern void WTSFreeMemory(IntPtr memory);
         const int WH_KEYBOARD_LL = 13, WH_MOUSE_LL = 14;
         const int WM_KEYDOWN = 0x0100, WM_SYSKEYDOWN = 0x0104, WM_MOUSEMOVE = 0x0200,
                   WM_LBUTTONDOWN = 0x0201, WM_RBUTTONDOWN = 0x0204, WM_MBUTTONDOWN = 0x0207;
@@ -46,6 +56,39 @@ if (-not ([System.Management.Automation.PSTypeName]'LastInputHelper').Type) {
             uint pid;
             GetWindowThreadProcessId(GetForegroundWindow(), out pid);
             return (int)pid;
+        }
+        // WTS_CONNECTSTATE_CLASS: Active=0, Disconnected=4.
+        // WTS_INFO_CLASS WTSClientProtocolType=16; protocol 2 is RDP, 0 is console.
+        public static string GetRemoteSessionState() {
+            IntPtr sessions = IntPtr.Zero;
+            int count = 0;
+            if (!WTSEnumerateSessions(IntPtr.Zero, 0, 1, out sessions, out count)) return "unknown";
+            bool active = false, disconnected = false, queryFailed = false;
+            try {
+                int size = Marshal.SizeOf(typeof(WTS_SESSION_INFO));
+                for (int i = 0; i < count; i++) {
+                    IntPtr current = IntPtr.Add(sessions, i * size);
+                    WTS_SESSION_INFO info = (WTS_SESSION_INFO)Marshal.PtrToStructure(current, typeof(WTS_SESSION_INFO));
+                    if (info.State != 0 && info.State != 4) continue;
+                    IntPtr buffer = IntPtr.Zero;
+                    int bytes = 0;
+                    if (!WTSQuerySessionInformation(IntPtr.Zero, info.SessionID, 16, out buffer, out bytes) || buffer == IntPtr.Zero || bytes < 2) {
+                        if (buffer != IntPtr.Zero) WTSFreeMemory(buffer);
+                        queryFailed = true;
+                        continue;
+                    }
+                    try {
+                        int protocol = (int)Marshal.ReadInt16(buffer);
+                        if (protocol == 2) {
+                            if (info.State == 0) active = true;
+                            else if (info.State == 4) disconnected = true;
+                        }
+                    } finally { WTSFreeMemory(buffer); }
+                }
+            } finally { WTSFreeMemory(sessions); }
+            if (active) return "active";
+            if (queryFailed) return "unknown";
+            return disconnected ? "disconnected" : "none";
         }
         static void Report(string kind) { Console.Out.WriteLine("I " + kind + " injected"); Console.Out.Flush(); }
         static IntPtr KeyboardHook(int code, IntPtr wParam, IntPtr lParam) {
@@ -112,6 +155,9 @@ while ($true) {
             $foreground = ($foreground -replace '[^A-Za-z0-9._-]', '').Substring(0, [Math]::Min(80, $foreground.Length))
             Send-Line "S $idleSec $locked $foreground"
         }
+        $remoteSession = 'unknown'
+        try { $remoteSession = [LastInputHelper]::GetRemoteSessionState() } catch { }
+        Send-Line "R $remoteSession"
     }
     catch { }
     Start-Sleep -Milliseconds 1000
